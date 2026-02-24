@@ -271,18 +271,18 @@ func TestRouter_Route(t *testing.T) {
 
 		// Error cases
 		{
-			name:        "empty body",
+			name:        "empty body defaults to tendermint",
 			contentType: "application/json",
 			path:        "/",
 			body:        []byte{},
-			wantErr:     true,
+			wantBackend: BackendCelestiaAppRPC,
 		},
 		{
-			name:        "nil body",
+			name:        "nil body defaults to tendermint",
 			contentType: "application/json",
 			path:        "/",
 			body:        nil,
-			wantErr:     true,
+			wantBackend: BackendCelestiaAppRPC,
 		},
 		{
 			name:        "invalid JSON",

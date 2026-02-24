@@ -5,13 +5,16 @@ GOFLAGS   := -trimpath
 VERSION   := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS   := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test lint run clean docker-build fmt vet tidy install-tools coverage
+.PHONY: build test test-integration lint run clean docker-build fmt vet tidy install-tools coverage
 
 build:
 	CGO_ENABLED=1 go build $(GOFLAGS) -ldflags '$(LDFLAGS)' -o $(BUILD_DIR)/$(BINARY) ./cmd/da-proxy
 
 test:
 	CGO_ENABLED=1 go test -race -count=1 -coverprofile=coverage.out ./...
+
+test-integration:
+	CGO_ENABLED=1 go test -race -count=1 -tags=integration -v -timeout=120s ./test/integration/...
 
 lint:
 	golangci-lint run ./...

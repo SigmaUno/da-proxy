@@ -1,0 +1,34 @@
+server:
+  listen: ":0"
+  read_timeout: 30s
+  write_timeout: 30s
+  max_body_size: "10MB"
+
+backends:
+  celestia_app_rpc: "http://195.154.212.53:26657"
+  celestia_app_grpc: "195.154.212.53:9090"
+  celestia_app_rest: "http://195.154.212.53:1317"
+  celestia_node_rpc: "http://195.154.103.57:26658"
+  health_check_interval: 30s
+
+tokens:
+  - token: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    name: "integration-test"
+    enabled: true
+    rate_limit: 0
+
+admin:
+  listen: ":0"
+  username: "admin"
+  password_hash: "$2a$10$placeholder"
+  log_buffer_size: 1000
+  log_retention_days: 1
+  log_db_path: ""
+
+logging:
+  level: "debug"
+  format: "console"
+
+metrics:
+  listen: ":0"
+  enabled: true

@@ -76,9 +76,11 @@ func AccessLogger(logger *zap.Logger, sinks ...LogSink) echo.MiddlewareFunc {
 				Path:          req.URL.Path,
 			}
 
-			// Push to sinks asynchronously.
+			// Push to sinks.
 			for _, sink := range sinks {
-				sink.Push(entry)
+				if sink != nil {
+					sink.Push(entry)
+				}
 			}
 
 			return err

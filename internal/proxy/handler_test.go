@@ -188,10 +188,10 @@ func TestHandler_EmptyBody(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/", nil)
-	req.Header.Set("Content-Type", "application/json")
+	// Empty body defaults to Tendermint RPC backend (supports GET-style requests).
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
-	assert.Equal(t, http.StatusBadRequest, rec.Code)
+	assert.Equal(t, http.StatusOK, rec.Code)
 }

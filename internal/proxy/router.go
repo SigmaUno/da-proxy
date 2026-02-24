@@ -84,7 +84,15 @@ func (r *router) Route(contentType string, path string, body []byte) (RouteDecis
 		}, nil
 	}
 
-	// 3. JSON-RPC method routing.
+	// 3. No body (e.g. GET /health, /status) — default to Tendermint RPC.
+	if len(body) == 0 {
+		return RouteDecision{
+			Backend:   BackendCelestiaAppRPC,
+			TargetURL: r.backends.CelestiaAppRPC,
+		}, nil
+	}
+
+	// 4. JSON-RPC method routing.
 	method, _, err := parseJSONRPCMethod(body)
 	if err != nil {
 		return RouteDecision{}, fmt.Errorf("parsing JSON-RPC request: %w", err)
