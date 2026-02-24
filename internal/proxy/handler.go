@@ -136,11 +136,14 @@ func (h *Handler) HandleRequest(c echo.Context) error {
 	// Determine if we should capture the response for caching.
 	shouldCache := cache.IsCacheable(decision.Method, height)
 
-	// Check whether archival fallback is possible for this request.
-	canFallback := height > 0 && h.router.HasArchivalBackend(decision.Backend)
+	// If the request targets a specific height and there are multiple endpoints
+	// to try, use the retry path that can fall back on pruned errors.
+	endpoints := h.router.AllEndpoints(decision.Backend)
+	hasArchival := h.router.HasArchivalBackend(decision.Backend)
+	canRetry := height > 0 && (len(endpoints) > 1 || hasArchival)
 
-	if canFallback {
-		return h.proxyWithFallback(c, req, decision, targetURL, path, rawQuery, body, height, shouldCache)
+	if canRetry {
+		return h.proxyWithRetry(c, req, decision, targetURL, path, rawQuery, body, height, shouldCache)
 	}
 
 	return h.proxyDirect(c, req, decision, targetURL, path, rawQuery, body, height, shouldCache)
@@ -153,52 +156,74 @@ func (h *Handler) proxyDirect(c echo.Context, req *http.Request, decision RouteD
 	return nil
 }
 
-// proxyWithFallback tries the primary backend first. If the response indicates
-// the block was pruned, it retries against the archival backend.
-func (h *Handler) proxyWithFallback(c echo.Context, req *http.Request, decision RouteDecision, targetURL *url.URL, path, rawQuery string, body []byte, height int64, shouldCache bool) error {
-	// Execute against the primary backend into a buffer.
-	buf := newBufferedResponseWriter()
-	proxy := h.buildRawProxy(targetURL, path, rawQuery, body, decision.Backend)
-	proxy.ServeHTTP(buf, req)
-
-	// Check if the response indicates a pruned/missing block.
+// proxyWithRetry tries the primary endpoint first. If it returns a pruned
+// error, it retries against other endpoints in the same backend pool, then
+// against the archival backend if configured.
+func (h *Handler) proxyWithRetry(c echo.Context, req *http.Request, decision RouteDecision, targetURL *url.URL, path, rawQuery string, body []byte, height int64, shouldCache bool) error {
+	// Try the initially-selected endpoint.
+	buf := h.tryEndpoint(req, targetURL, path, rawQuery, body, decision.Backend)
 	if !isPrunedError(buf.statusCode, buf.body.Bytes()) {
-		// Primary succeeded (or non-pruning error), flush to client.
 		return h.flushBuffered(c, buf, decision.Backend, decision.Method, height, body, shouldCache)
 	}
 
-	h.logger.Info("pruned backend returned block-not-found, retrying with archival",
+	triedURL := targetURL.String()
+	h.logger.Info("endpoint returned block-not-found, trying alternatives",
 		zap.String("backend", string(decision.Backend)),
+		zap.String("tried", triedURL),
 		zap.Int64("height", height),
 	)
 
-	// Retry against archival backend.
-	archivalBackend := h.router.ArchivalBackendFor(decision.Backend)
-	archivalURL := h.router.TargetURL(archivalBackend)
-	archivalTarget, err := url.Parse(archivalURL)
-	if err != nil {
-		h.logger.Error("invalid archival backend URL",
-			zap.String("backend", string(archivalBackend)),
-			zap.String("url", archivalURL),
-			zap.Error(err),
+	// Try remaining endpoints in the same backend pool.
+	for _, ep := range h.router.AllEndpoints(decision.Backend) {
+		if ep == triedURL {
+			continue
+		}
+		altTarget, err := url.Parse(ep)
+		if err != nil {
+			continue
+		}
+		if body != nil {
+			req.Body = io.NopCloser(bytes.NewReader(body))
+		}
+		buf = h.tryEndpoint(req, altTarget, path, rawQuery, body, decision.Backend)
+		if !isPrunedError(buf.statusCode, buf.body.Bytes()) {
+			return h.flushBuffered(c, buf, decision.Backend, decision.Method, height, body, shouldCache)
+		}
+		h.logger.Info("alternative endpoint also returned block-not-found",
+			zap.String("endpoint", ep),
+			zap.Int64("height", height),
 		)
-		// Fall back to the original (pruned) response.
-		return h.flushBuffered(c, buf, decision.Backend, decision.Method, height, body, shouldCache)
 	}
 
-	// Reset request body for replay.
-	if body != nil {
-		req.Body = io.NopCloser(bytes.NewReader(body))
+	// Try archival backend if configured.
+	if h.router.HasArchivalBackend(decision.Backend) {
+		archivalBackend := h.router.ArchivalBackendFor(decision.Backend)
+		for _, ep := range h.router.AllEndpoints(archivalBackend) {
+			archivalTarget, err := url.Parse(ep)
+			if err != nil {
+				continue
+			}
+			if body != nil {
+				req.Body = io.NopCloser(bytes.NewReader(body))
+			}
+			buf = h.tryEndpoint(req, archivalTarget, path, rawQuery, body, archivalBackend)
+			if !isPrunedError(buf.statusCode, buf.body.Bytes()) {
+				c.Set(middleware.ContextKeyBackend, string(archivalBackend))
+				return h.flushBuffered(c, buf, archivalBackend, decision.Method, height, body, shouldCache)
+			}
+		}
 	}
 
-	archivalBuf := newBufferedResponseWriter()
-	archivalProxy := h.buildRawProxy(archivalTarget, path, rawQuery, body, archivalBackend)
-	archivalProxy.ServeHTTP(archivalBuf, req)
+	// All endpoints failed — return the last response.
+	return h.flushBuffered(c, buf, decision.Backend, decision.Method, height, body, shouldCache)
+}
 
-	// Update context to reflect the actual backend used.
-	c.Set(middleware.ContextKeyBackend, string(archivalBackend))
-
-	return h.flushBuffered(c, archivalBuf, archivalBackend, decision.Method, height, body, shouldCache)
+// tryEndpoint proxies to a single endpoint and returns the buffered response.
+func (h *Handler) tryEndpoint(req *http.Request, targetURL *url.URL, path, rawQuery string, body []byte, backend Backend) *bufferedResponseWriter {
+	buf := newBufferedResponseWriter()
+	proxy := h.buildRawProxy(targetURL, path, rawQuery, body, backend)
+	proxy.ServeHTTP(buf, req)
+	return buf
 }
 
 // flushBuffered writes a buffered proxy response to the real Echo response,

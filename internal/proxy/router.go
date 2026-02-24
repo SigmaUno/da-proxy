@@ -41,6 +41,7 @@ type RouteDecision struct {
 type Router interface {
 	Route(body []byte) (RouteDecision, error)
 	TargetURL(backend Backend) string
+	AllEndpoints(backend Backend) []string
 	GetHeightTracker() *HeightTracker
 	ArchivalBackendFor(backend Backend) Backend
 	HasArchivalBackend(backend Backend) bool
@@ -140,6 +141,14 @@ func (r *router) resolveBackend(method string) Backend {
 		return BackendCelestiaNodeRPC
 	}
 	return BackendCelestiaAppRPC
+}
+
+// AllEndpoints returns all configured endpoint URLs for a backend.
+func (r *router) AllEndpoints(backend Backend) []string {
+	if bal, ok := r.balancers[backend]; ok {
+		return bal.All()
+	}
+	return nil
 }
 
 func (r *router) GetHeightTracker() *HeightTracker {

@@ -672,7 +672,7 @@ func TestHandler_FallbackNotTriggeredOnSuccess(t *testing.T) {
 }
 
 func TestHandler_NoFallbackWithoutArchivalConfig(t *testing.T) {
-	// Without archival backend configured, pruned error should pass through.
+	// Without archival backend configured and only one endpoint, pruned error should pass through.
 	pruned := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
@@ -683,7 +683,7 @@ func TestHandler_NoFallbackWithoutArchivalConfig(t *testing.T) {
 	backends := config.BackendsConfig{
 		CelestiaAppRPC:  config.Endpoints{pruned.URL},
 		CelestiaNodeRPC: config.Endpoints{pruned.URL},
-		// No archival backends configured.
+		// No archival backends configured, single endpoint each.
 	}
 
 	router := NewRouter(backends)
@@ -699,4 +699,49 @@ func TestHandler_NoFallbackWithoutArchivalConfig(t *testing.T) {
 	assert.Equal(t, http.StatusOK, rec.Code)
 	respBody, _ := io.ReadAll(rec.Body)
 	assert.Contains(t, string(respBody), "is not available")
+}
+
+func TestHandler_RetryOtherEndpointInPool(t *testing.T) {
+	// First endpoint doesn't have the block, second endpoint does.
+	prunedNode := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","error":{"code":-32603,"message":"Internal error","data":"height 286001 is not available, lowest height is 1500000"},"id":1}`))
+	}))
+	t.Cleanup(prunedNode.Close)
+
+	fullNode := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":{"block":{"header":{"height":"286001"}}},"id":1}`))
+	}))
+	t.Cleanup(fullNode.Close)
+
+	backends := config.BackendsConfig{
+		CelestiaAppRPC:  config.Endpoints{prunedNode.URL, fullNode.URL},
+		CelestiaNodeRPC: config.Endpoints{prunedNode.URL},
+		// No archival backends — just two endpoints in the same pool.
+	}
+
+	router := NewRouter(backends)
+	handler := NewHandler(router, 10*1024*1024, zap.NewNop())
+
+	e := echo.New()
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			c.Set(middleware.ContextKeyRequestID, "test-request-id")
+			return next(c)
+		}
+	})
+	e.Any("/*", handler.HandleRequest)
+
+	req := httptest.NewRequest(http.MethodGet, "/block?height=286001", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	respBody, err := io.ReadAll(rec.Body)
+	require.NoError(t, err)
+	assert.Contains(t, string(respBody), "286001")
+	assert.NotContains(t, string(respBody), "is not available")
 }
