@@ -18,11 +18,13 @@ import (
 
 	"github.com/SigmaUno/da-proxy/internal/admin"
 	"github.com/SigmaUno/da-proxy/internal/auth"
+	proxyCache "github.com/SigmaUno/da-proxy/internal/cache"
 	"github.com/SigmaUno/da-proxy/internal/config"
 	"github.com/SigmaUno/da-proxy/internal/logging"
 	"github.com/SigmaUno/da-proxy/internal/metrics"
 	"github.com/SigmaUno/da-proxy/internal/middleware"
 	"github.com/SigmaUno/da-proxy/internal/proxy"
+	"github.com/SigmaUno/da-proxy/internal/tracing"
 )
 
 var version = "dev"
@@ -54,6 +56,20 @@ func main() {
 		zap.String("metrics_listen", cfg.Metrics.Listen),
 	)
 
+	// OpenTelemetry tracing.
+	tracingShutdown, tracingErr := tracing.Init(context.Background(), tracing.Config{
+		Enabled:    cfg.Tracing.Enabled,
+		Endpoint:   cfg.Tracing.Endpoint,
+		SampleRate: cfg.Tracing.SampleRate,
+	}, version)
+	if tracingErr != nil {
+		logger.Fatal("failed to initialize tracing", zap.Error(tracingErr))
+	}
+	defer func() { _ = tracingShutdown(context.Background()) }()
+	if cfg.Tracing.Enabled {
+		logger.Info("distributed tracing enabled", zap.String("endpoint", cfg.Tracing.Endpoint))
+	}
+
 	// Token store (SQLite-backed with in-memory cache).
 	tokenDBPath := filepath.Join(filepath.Dir(cfg.Admin.LogDBPath), "tokens.db")
 	if dir := filepath.Dir(tokenDBPath); dir != "" {
@@ -75,24 +91,44 @@ func main() {
 		}
 	}
 
-	// Rate limiter store.
-	rateLimiterStore := middleware.NewRateLimiterStore()
+	// Rate limiter.
+	var rateLimitMiddleware echo.MiddlewareFunc
+	if cfg.Storage.RedisURL != "" {
+		redisRL, rlErr := middleware.NewRedisRateLimiter(cfg.Storage.RedisURL)
+		if rlErr != nil {
+			logger.Fatal("failed to create redis rate limiter", zap.Error(rlErr))
+		}
+		defer func() { _ = redisRL.Close() }()
+		rateLimitMiddleware = middleware.RedisRateLimit(redisRL)
+		logger.Info("distributed rate limiting enabled via Redis")
+	} else {
+		rateLimiterStore := middleware.NewRateLimiterStore()
+		rateLimitMiddleware = middleware.RateLimit(rateLimiterStore)
+	}
 
 	// Ring buffer for recent logs.
 	ringBuffer := logging.NewRingBuffer(cfg.Admin.LogBufferSize)
 
-	// SQLite persistent log store.
-	if dir := filepath.Dir(cfg.Admin.LogDBPath); dir != "" {
-		_ = os.MkdirAll(dir, 0o755)
+	// Persistent log store (SQLite or PostgreSQL).
+	var logStore logging.Store
+	retention := time.Duration(cfg.Admin.LogRetentionDays) * 24 * time.Hour
+	if cfg.Storage.LogDriver == "postgres" && cfg.Storage.PostgresDSN != "" {
+		logStore, err = logging.NewPostgresStore(cfg.Storage.PostgresDSN, retention)
+		if err != nil {
+			logger.Fatal("failed to create postgres log store", zap.Error(err))
+		}
+		logger.Info("log storage: PostgreSQL")
+	} else {
+		if dir := filepath.Dir(cfg.Admin.LogDBPath); dir != "" {
+			_ = os.MkdirAll(dir, 0o755)
+		}
+		logStore, err = logging.NewSQLiteStore(cfg.Admin.LogDBPath, retention)
+		if err != nil {
+			logger.Fatal("failed to create sqlite log store", zap.Error(err))
+		}
+		logger.Info("log storage: SQLite")
 	}
-	sqliteStore, err := logging.NewSQLiteStore(
-		cfg.Admin.LogDBPath,
-		time.Duration(cfg.Admin.LogRetentionDays)*24*time.Hour,
-	)
-	if err != nil {
-		logger.Fatal("failed to create log store", zap.Error(err))
-	}
-	defer func() { _ = sqliteStore.Close() }()
+	defer func() { _ = logStore.Close() }()
 
 	// Prometheus metrics.
 	registry := prometheus.NewRegistry()
@@ -107,8 +143,30 @@ func main() {
 		logger.Fatal("invalid max_body_size", zap.Error(err))
 	}
 
+	// Response cache.
+	var responseCache proxyCache.Cache = proxyCache.NoopCache{}
+	if cfg.Cache.Enabled {
+		maxEntrySize, cacheErr := cfg.Cache.MaxEntrySizeBytes()
+		if cacheErr != nil {
+			logger.Fatal("invalid cache.max_entry_size", zap.Error(cacheErr))
+		}
+		rc, cacheErr := proxyCache.NewRedisCache(proxyCache.Config{
+			Enabled:      true,
+			RedisURL:     cfg.Cache.RedisURL,
+			TTL:          cfg.Cache.TTL,
+			MaxEntrySize: maxEntrySize,
+		}, logger)
+		if cacheErr != nil {
+			logger.Fatal("failed to create response cache", zap.Error(cacheErr))
+		}
+		defer func() { _ = rc.Close() }()
+		cacheMetrics := proxyCache.RegisterMetrics(registry)
+		responseCache = proxyCache.NewInstrumentedCache(rc, cacheMetrics)
+		logger.Info("response cache enabled", zap.String("redis_url", cfg.Cache.RedisURL))
+	}
+
 	// Proxy handler.
-	proxyHandler := proxy.NewHandler(router, maxBodySize, logger)
+	proxyHandler := proxy.NewHandler(router, maxBodySize, logger, proxy.WithCache(responseCache))
 
 	// WebSocket proxy.
 	wsProxy := proxy.NewWebSocketProxy(router, logger)
@@ -130,13 +188,19 @@ func main() {
 	proxyServer.HideBanner = true
 	proxyServer.HidePort = true
 
-	proxyServer.Use(
+	middlewares := []echo.MiddlewareFunc{
 		middleware.RequestID(),
+	}
+	if cfg.Tracing.Enabled {
+		middlewares = append(middlewares, tracing.Middleware())
+	}
+	middlewares = append(middlewares,
 		middleware.Auth(tokenStore),
-		middleware.RateLimit(rateLimiterStore),
-		middleware.AccessLogger(logger, ringBuffer, sqliteStore),
+		rateLimitMiddleware,
+		middleware.AccessLogger(logger, ringBuffer, logStore),
 		middleware.MetricsMiddleware(promMetrics),
 	)
+	proxyServer.Use(middlewares...)
 
 	// Protocol routing: WebSocket, gRPC, or HTTP proxy.
 	proxyServer.Any("/*", func(c echo.Context) error {
@@ -156,7 +220,7 @@ func main() {
 	// --- Admin server ---
 	adminServer := admin.NewServer(cfg.Admin, admin.Dependencies{
 		LogBuffer:     ringBuffer,
-		LogStore:      sqliteStore,
+		LogStore:      logStore,
 		HealthChecker: healthChecker,
 		TokenStore:    tokenStore,
 		Config:        cfg,

@@ -119,3 +119,41 @@ groups:
             been above 2 seconds for the last 3 minutes. Current duration:
             {{ $value | humanizeDuration }}.
           runbook_url: "https://runbooks.example.com/da-proxy/backend-high-latency"
+
+      # -----------------------------------------------------------------------
+      # DAProxyCacheUnavailable
+      # Fires when both cache hits and misses metrics are absent, indicating
+      # the cache subsystem may be down or not reporting.
+      # -----------------------------------------------------------------------
+      - alert: DAProxyCacheUnavailable
+        expr: |
+          absent(daproxy_cache_hits_total) and absent(daproxy_cache_misses_total)
+        for: 5m
+        labels:
+          severity: warning
+          service: da-proxy
+        annotations:
+          summary: "DA-Proxy cache metrics are unavailable"
+          description: >-
+            Both daproxy_cache_hits_total and daproxy_cache_misses_total have
+            been absent for the last 5 minutes. The cache subsystem may be
+            down or not reporting metrics.
+          runbook_url: "https://runbooks.example.com/da-proxy/cache-unavailable"
+
+      # -----------------------------------------------------------------------
+      # DAProxyCacheLowHitRatio
+      # Fires when the cache hit ratio drops below 30% for 15 minutes.
+      # -----------------------------------------------------------------------
+      - alert: DAProxyCacheLowHitRatio
+        expr: daproxy_cache_hit_ratio < 0.3
+        for: 15m
+        labels:
+          severity: warning
+          service: da-proxy
+        annotations:
+          summary: "DA-Proxy cache hit ratio is below 30%"
+          description: >-
+            The cache hit ratio has been below 30% for the last 15 minutes.
+            Current value: {{ $value | humanizePercentage }}. This may indicate
+            cache misconfiguration or a change in traffic patterns.
+          runbook_url: "https://runbooks.example.com/da-proxy/cache-low-hit-ratio"

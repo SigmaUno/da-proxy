@@ -19,6 +19,42 @@ type Config struct {
 	Admin    AdminConfig    `yaml:"admin"`
 	Logging  LoggingConfig  `yaml:"logging"`
 	Metrics  MetricsConfig  `yaml:"metrics"`
+	Cache    CacheConfig    `yaml:"cache"`
+	Storage  StorageConfig  `yaml:"storage"`
+	Tracing  TracingConfig  `yaml:"tracing"`
+}
+
+// TracingConfig holds OpenTelemetry tracing settings.
+type TracingConfig struct {
+	Enabled    bool    `yaml:"enabled"`
+	Endpoint   string  `yaml:"endpoint"`
+	SampleRate float64 `yaml:"sample_rate"`
+}
+
+// StorageConfig holds settings for horizontal scaling.
+type StorageConfig struct {
+	// LogDriver selects the log storage backend: "sqlite" (default) or "postgres".
+	LogDriver string `yaml:"log_driver"`
+	// PostgresDSN is the connection string for PostgreSQL log storage.
+	PostgresDSN string `yaml:"postgres_dsn"`
+	// RedisURL enables Redis-backed distributed rate limiting when set.
+	RedisURL string `yaml:"redis_url"`
+}
+
+// CacheConfig holds response cache settings.
+type CacheConfig struct {
+	Enabled      bool          `yaml:"enabled"`
+	RedisURL     string        `yaml:"redis_url"`
+	TTL          time.Duration `yaml:"ttl"`
+	MaxEntrySize string        `yaml:"max_entry_size"`
+}
+
+// MaxEntrySizeBytes parses the MaxEntrySize string into bytes.
+func (c CacheConfig) MaxEntrySizeBytes() (int64, error) {
+	if c.MaxEntrySize == "" {
+		return 5 * 1024 * 1024, nil // 5MB default
+	}
+	return parseSize(c.MaxEntrySize)
 }
 
 // ServerConfig holds proxy server settings.

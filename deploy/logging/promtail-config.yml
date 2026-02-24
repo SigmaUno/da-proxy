@@ -1,0 +1,85 @@
+## Promtail configuration for shipping DA-Proxy logs to Grafana Loki.
+##
+## DA-Proxy outputs structured JSON logs to stdout. Promtail reads the
+## container/journal logs and forwards them to Loki for querying via LogQL.
+##
+## Key log fields emitted by DA-Proxy:
+##   level, ts, msg, request_id, token_name, method, backend,
+##   status_code, latency_ms, request_bytes, response_bytes, client_ip, path
+##
+## Example LogQL queries:
+##   {app="da-proxy"} | json | status_code >= 500
+##   {app="da-proxy"} | json | method="blob.Get" | latency_ms > 1000
+##   {app="da-proxy"} | json | backend="celestia-node-rpc"
+
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  # Docker container logs (when running da-proxy in Docker).
+  - job_name: da-proxy-docker
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+    relabel_configs:
+      - source_labels: ['__meta_docker_container_name']
+        regex: '.*da-proxy.*'
+        action: keep
+      - source_labels: ['__meta_docker_container_name']
+        target_label: container
+    pipeline_stages:
+      - json:
+          expressions:
+            level: level
+            ts: ts
+            msg: msg
+            request_id: request_id
+            method: method
+            backend: backend
+            token_name: token_name
+            status_code: status_code
+      - labels:
+          level:
+          method:
+          backend:
+      - timestamp:
+          source: ts
+          format: RFC3339Nano
+
+  # Kubernetes pod logs (when running in Kubernetes).
+  - job_name: da-proxy-kubernetes
+    kubernetes_sd_configs:
+      - role: pod
+    relabel_configs:
+      - source_labels: ['__meta_kubernetes_pod_label_app']
+        regex: da-proxy
+        action: keep
+      - source_labels: ['__meta_kubernetes_namespace']
+        target_label: namespace
+      - source_labels: ['__meta_kubernetes_pod_name']
+        target_label: pod
+    pipeline_stages:
+      - json:
+          expressions:
+            level: level
+            ts: ts
+            msg: msg
+            request_id: request_id
+            method: method
+            backend: backend
+            token_name: token_name
+            status_code: status_code
+      - labels:
+          level:
+          method:
+          backend:
+      - timestamp:
+          source: ts
+          format: RFC3339Nano

@@ -1,10 +1,12 @@
 package proxy
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/labstack/echo/v4"
@@ -13,9 +15,52 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/SigmaUno/da-proxy/internal/auth"
+	"github.com/SigmaUno/da-proxy/internal/cache"
 	"github.com/SigmaUno/da-proxy/internal/config"
 	"github.com/SigmaUno/da-proxy/internal/middleware"
 )
+
+// mockCache records cache operations for testing.
+type mockCache struct {
+	mu    sync.Mutex
+	store map[string][]byte
+	gets  int
+	sets  int
+	hits  int
+}
+
+func newMockCache() *mockCache {
+	return &mockCache{store: make(map[string][]byte)}
+}
+
+func (m *mockCache) Get(_ context.Context, method string, height int64, params []byte) ([]byte, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.gets++
+	key := cache.Key(method, height, params)
+	if data, ok := m.store[key]; ok {
+		m.hits++
+		return data, true
+	}
+	return nil, false
+}
+
+func (m *mockCache) Set(_ context.Context, method string, height int64, params []byte, response []byte) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.sets++
+	key := cache.Key(method, height, params)
+	m.store[key] = append([]byte(nil), response...)
+}
+
+func (m *mockCache) Close() error { return nil }
+
+func (m *mockCache) preload(method string, height int64, params []byte, response []byte) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	key := cache.Key(method, height, params)
+	m.store[key] = append([]byte(nil), response...)
+}
 
 func setupHandlerTest(t *testing.T, backendHandler http.HandlerFunc) (*echo.Echo, *httptest.Server) {
 	t.Helper()
@@ -324,4 +369,153 @@ func TestHandler_MethodAuth_NoTokenInfo(t *testing.T) {
 	e.ServeHTTP(rec, req)
 
 	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func setupHandlerTestWithCache(t *testing.T, mc *mockCache, backendHandler http.HandlerFunc) *echo.Echo {
+	t.Helper()
+	backend := httptest.NewServer(backendHandler)
+	t.Cleanup(backend.Close)
+
+	backends := config.BackendsConfig{
+		CelestiaAppRPC:  backend.URL,
+		CelestiaAppGRPC: backend.Listener.Addr().String(),
+		CelestiaAppREST: backend.URL,
+		CelestiaNodeRPC: backend.URL,
+	}
+
+	router := NewRouter(backends)
+	handler := NewHandler(router, 10*1024*1024, zap.NewNop(), WithCache(mc))
+
+	e := echo.New()
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			c.Set(middleware.ContextKeyRequestID, "test-request-id")
+			return next(c)
+		}
+	})
+	e.Any("/*", handler.HandleRequest)
+	return e
+}
+
+func TestHandler_Cache_Hit(t *testing.T) {
+	mc := newMockCache()
+	backendCalled := false
+
+	e := setupHandlerTestWithCache(t, mc, func(w http.ResponseWriter, _ *http.Request) {
+		backendCalled = true
+		w.WriteHeader(http.StatusOK)
+	})
+
+	// Preload cache with a response for block at height 100.
+	reqBody := `{"jsonrpc":"2.0","id":1,"method":"block","params":["100"]}`
+	cachedResp := `{"jsonrpc":"2.0","result":{"block":{}},"id":1}`
+	mc.preload("block", 100, []byte(reqBody), []byte(cachedResp))
+
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.False(t, backendCalled, "backend should not be called on cache hit")
+	assert.Equal(t, "HIT", rec.Header().Get(HeaderXCacheStatus))
+	assert.Equal(t, "celestia-app-rpc", rec.Header().Get(HeaderXDABackend))
+
+	respBody, _ := io.ReadAll(rec.Body)
+	assert.Equal(t, cachedResp, string(respBody))
+}
+
+func TestHandler_Cache_Miss(t *testing.T) {
+	mc := newMockCache()
+	backendResp := `{"jsonrpc":"2.0","result":{"block":{}},"id":1}`
+
+	e := setupHandlerTestWithCache(t, mc, func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(backendResp))
+	})
+
+	reqBody := `{"jsonrpc":"2.0","id":1,"method":"block","params":["100"]}`
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "MISS", rec.Header().Get(HeaderXCacheStatus))
+
+	// Cache should have been populated.
+	mc.mu.Lock()
+	assert.Equal(t, 1, mc.gets)
+	assert.Equal(t, 1, mc.sets)
+	mc.mu.Unlock()
+}
+
+func TestHandler_Cache_Bypass_NonCacheable(t *testing.T) {
+	mc := newMockCache()
+
+	e := setupHandlerTestWithCache(t, mc, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":{},"id":1}`))
+	})
+
+	// "status" is non-cacheable.
+	body := `{"jsonrpc":"2.0","id":1,"method":"status","params":[]}`
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Empty(t, rec.Header().Get(HeaderXCacheStatus))
+
+	mc.mu.Lock()
+	assert.Equal(t, 0, mc.gets)
+	assert.Equal(t, 0, mc.sets)
+	mc.mu.Unlock()
+}
+
+func TestHandler_Cache_Bypass_WriteMethod(t *testing.T) {
+	mc := newMockCache()
+
+	e := setupHandlerTestWithCache(t, mc, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":{},"id":1}`))
+	})
+
+	// "broadcast_tx_sync" is a write operation - never cached.
+	body := `{"jsonrpc":"2.0","id":1,"method":"broadcast_tx_sync","params":["abc"]}`
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	mc.mu.Lock()
+	assert.Equal(t, 0, mc.sets)
+	mc.mu.Unlock()
+}
+
+func TestHandler_Cache_Bypass_LatestHeight(t *testing.T) {
+	mc := newMockCache()
+
+	e := setupHandlerTestWithCache(t, mc, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":{},"id":1}`))
+	})
+
+	// "block" with no height param (latest) - not cacheable.
+	body := `{"jsonrpc":"2.0","id":1,"method":"block","params":[]}`
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	mc.mu.Lock()
+	assert.Equal(t, 0, mc.gets)
+	assert.Equal(t, 0, mc.sets)
+	mc.mu.Unlock()
 }

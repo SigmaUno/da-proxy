@@ -1,0 +1,24 @@
+{
+  "agent": {
+    "run_as_user": "root"
+  },
+  "logs": {
+    "logs_collected": {
+      "files": {
+        "collect_list": [
+          {
+            "file_path": "/var/log/da-proxy/*.log",
+            "log_group_name": "/da-proxy/logs",
+            "log_stream_name": "{instance_id}-{hostname}",
+            "timestamp_format": "%Y-%m-%dT%H:%M:%S",
+            "timezone": "UTC",
+            "multi_line_start_pattern": "{",
+            "encoding": "utf-8"
+          }
+        ]
+      }
+    },
+    "log_stream_name": "da-proxy",
+    "force_flush_interval": 15
+  }
+}
