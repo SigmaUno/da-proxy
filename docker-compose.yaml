@@ -1,0 +1,58 @@
+services:
+  da-proxy:
+    build:
+      context: .
+      args:
+        VERSION: ${VERSION:-dev}
+    ports:
+      - "443:443"
+      - "8080:8080"
+      - "9191:9191"
+    volumes:
+      - ./configs:/etc/da-proxy:ro
+      - proxy-data:/data
+    depends_on:
+      celestia-app:
+        condition: service_healthy
+      celestia-node:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9191/metrics"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  celestia-app:
+    image: ghcr.io/celestiaorg/celestia-app:latest
+    ports:
+      - "26657:26657"
+      - "9090:9090"
+      - "1317:1317"
+    volumes:
+      - celestia-app-data:/home/celestia
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:26657/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  celestia-node:
+    image: ghcr.io/celestiaorg/celestia-node:latest
+    ports:
+      - "26658:26658"
+    volumes:
+      - celestia-node-data:/home/celestia
+    depends_on:
+      celestia-app:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:26658"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  proxy-data:
+  celestia-app-data:
+  celestia-node-data:

@@ -1,0 +1,39 @@
+server:
+  listen: ":443"
+  tls_cert: ""
+  tls_key: ""
+  read_timeout: 30s
+  write_timeout: 30s
+  max_body_size: "10MB"
+
+logging:
+  level: "info"
+  format: "json"
+
+metrics:
+  listen: ":9191"
+  enabled: true
+
+backends:
+  celestia_app_rpc: "http://127.0.0.1:26657"
+  celestia_app_grpc: "127.0.0.1:9090"
+  celestia_app_rest: "http://127.0.0.1:1317"
+  celestia_node_rpc: "http://127.0.0.1:26658"
+  health_check_interval: 30s
+
+tokens:
+  - token: "1836edb755cdff631a3463cee9b7b12268ded282"
+    name: "my-service"
+    enabled: true
+    rate_limit: 0
+    allowed_methods: []
+
+admin:
+  listen: ":8080"
+  username: "admin"
+  password_hash: "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy"
+  cors_origins:
+    - "http://localhost:3000"
+  log_buffer_size: 100000
+  log_retention_days: 30
+  log_db_path: "data/logs.db"

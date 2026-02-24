@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.9.0
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: Install SQLite dev headers
+        run: sudo apt-get update && sudo apt-get install -y gcc libsqlite3-dev
+      - name: Run tests
+        run: CGO_ENABLED=1 go test -race -count=1 -coverprofile=coverage.out -covermode=atomic ./...
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage.out
+        if: github.event_name == 'push'
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: [lint, test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+      - name: Install SQLite dev headers
+        run: sudo apt-get update && sudo apt-get install -y gcc libsqlite3-dev
+      - name: Build binary
+        run: |
+          CGO_ENABLED=1 go build -trimpath \
+            -ldflags="-s -w -X main.version=${{ github.sha }}" \
+            -o bin/da-proxy ./cmd/da-proxy
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: da-proxy
+          path: bin/da-proxy
