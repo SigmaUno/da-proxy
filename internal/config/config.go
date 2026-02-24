@@ -38,11 +38,14 @@ func (s ServerConfig) MaxBodySizeBytes() (int64, error) {
 
 // BackendsConfig holds backend endpoint URLs.
 type BackendsConfig struct {
-	CelestiaAppRPC      string        `yaml:"celestia_app_rpc"`
-	CelestiaAppGRPC     string        `yaml:"celestia_app_grpc"`
-	CelestiaAppREST     string        `yaml:"celestia_app_rest"`
-	CelestiaNodeRPC     string        `yaml:"celestia_node_rpc"`
-	HealthCheckInterval time.Duration `yaml:"health_check_interval"`
+	CelestiaAppRPC          string        `yaml:"celestia_app_rpc"`
+	CelestiaAppGRPC         string        `yaml:"celestia_app_grpc"`
+	CelestiaAppREST         string        `yaml:"celestia_app_rest"`
+	CelestiaNodeRPC         string        `yaml:"celestia_node_rpc"`
+	CelestiaNodeArchivalRPC string        `yaml:"celestia_node_archival_rpc"`
+	CelestiaAppArchivalRPC  string        `yaml:"celestia_app_archival_rpc"`
+	PruningWindow           int64         `yaml:"pruning_window"`
+	HealthCheckInterval     time.Duration `yaml:"health_check_interval"`
 }
 
 // TokenConfig defines a single API token entry.

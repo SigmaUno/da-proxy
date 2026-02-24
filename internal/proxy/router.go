@@ -13,10 +13,12 @@ type Backend string
 
 // Backend constants identify the supported proxy targets.
 const (
-	BackendCelestiaAppRPC  Backend = "celestia-app-rpc"
-	BackendCelestiaAppGRPC Backend = "celestia-app-grpc"
-	BackendCelestiaAppREST Backend = "celestia-app-rest"
-	BackendCelestiaNodeRPC Backend = "celestia-node-rpc"
+	BackendCelestiaAppRPC          Backend = "celestia-app-rpc"
+	BackendCelestiaAppGRPC         Backend = "celestia-app-grpc"
+	BackendCelestiaAppREST         Backend = "celestia-app-rest"
+	BackendCelestiaNodeRPC         Backend = "celestia-node-rpc"
+	BackendCelestiaNodeArchivalRPC Backend = "celestia-node-archival-rpc"
+	BackendCelestiaAppArchivalRPC  Backend = "celestia-app-archival-rpc"
 )
 
 // daNamespaces are JSON-RPC method prefixes routed to celestia-node.
@@ -41,15 +43,25 @@ type RouteDecision struct {
 type Router interface {
 	Route(contentType string, path string, body []byte) (RouteDecision, error)
 	TargetURL(backend Backend) string
+	GetHeightTracker() *HeightTracker
 }
 
 type router struct {
-	backends config.BackendsConfig
+	backends      config.BackendsConfig
+	heightTracker *HeightTracker
 }
 
 // NewRouter creates a Router from backend configuration.
 func NewRouter(backends config.BackendsConfig) Router {
-	return &router{backends: backends}
+	return &router{
+		backends:      backends,
+		heightTracker: NewHeightTracker(backends.PruningWindow),
+	}
+}
+
+// NewRouterWithTracker creates a Router with an explicit HeightTracker.
+func NewRouterWithTracker(backends config.BackendsConfig, ht *HeightTracker) Router {
+	return &router{backends: backends, heightTracker: ht}
 }
 
 func (r *router) TargetURL(backend Backend) string {
@@ -62,6 +74,16 @@ func (r *router) TargetURL(backend Backend) string {
 		return r.backends.CelestiaAppREST
 	case BackendCelestiaNodeRPC:
 		return r.backends.CelestiaNodeRPC
+	case BackendCelestiaNodeArchivalRPC:
+		if r.backends.CelestiaNodeArchivalRPC != "" {
+			return r.backends.CelestiaNodeArchivalRPC
+		}
+		return r.backends.CelestiaNodeRPC // fallback to pruned
+	case BackendCelestiaAppArchivalRPC:
+		if r.backends.CelestiaAppArchivalRPC != "" {
+			return r.backends.CelestiaAppArchivalRPC
+		}
+		return r.backends.CelestiaAppRPC // fallback to pruned
 	default:
 		return ""
 	}
@@ -101,6 +123,16 @@ func (r *router) Route(contentType string, path string, body []byte) (RouteDecis
 	// For batch requests we route based on the first method.
 	// Mixed-backend batches are not supported.
 	backend := r.resolveBackend(method)
+
+	// Height-aware routing: check if this request targets a historical height
+	// that requires the archival node.
+	if r.heightTracker != nil && r.heightTracker.Enabled() {
+		height := ExtractHeight(method, body)
+		if r.heightTracker.IsArchival(height) {
+			backend = r.archivalBackend(backend)
+		}
+	}
+
 	return RouteDecision{
 		Backend:   backend,
 		TargetURL: r.TargetURL(backend),
@@ -114,6 +146,22 @@ func (r *router) resolveBackend(method string) Backend {
 		return BackendCelestiaNodeRPC
 	}
 	return BackendCelestiaAppRPC
+}
+
+func (r *router) GetHeightTracker() *HeightTracker {
+	return r.heightTracker
+}
+
+// archivalBackend maps a pruned backend to its archival equivalent.
+func (r *router) archivalBackend(pruned Backend) Backend {
+	switch pruned {
+	case BackendCelestiaNodeRPC:
+		return BackendCelestiaNodeArchivalRPC
+	case BackendCelestiaAppRPC:
+		return BackendCelestiaAppArchivalRPC
+	default:
+		return pruned
+	}
 }
 
 // extractNamespace returns the namespace prefix before the first dot.

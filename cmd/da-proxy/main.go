@@ -110,15 +110,19 @@ func main() {
 	// Proxy handler.
 	proxyHandler := proxy.NewHandler(router, maxBodySize, logger)
 
+	// WebSocket proxy.
+	wsProxy := proxy.NewWebSocketProxy(router, logger)
+
 	// gRPC proxy.
 	grpcProxy := proxy.NewGRPCProxy(cfg.Backends.CelestiaAppGRPC, logger)
 
-	// Health checker.
+	// Health checker (with height tracker for archival routing).
 	healthChecker := proxy.NewHealthChecker(
 		cfg.Backends,
 		cfg.Backends.HealthCheckInterval,
 		promMetrics,
 		logger,
+		router.GetHeightTracker(),
 	)
 
 	// --- Proxy server ---
@@ -134,8 +138,13 @@ func main() {
 		middleware.MetricsMiddleware(promMetrics),
 	)
 
-	// gRPC routing: if content-type is application/grpc, use the gRPC proxy.
+	// Protocol routing: WebSocket, gRPC, or HTTP proxy.
 	proxyServer.Any("/*", func(c echo.Context) error {
+		// WebSocket upgrade.
+		if proxy.IsWebSocketUpgrade(c.Request()) {
+			return wsProxy.Handle(c)
+		}
+		// gRPC.
 		ct := c.Request().Header.Get("Content-Type")
 		if len(ct) >= 16 && ct[:16] == "application/grpc" {
 			grpcProxy.Handler().ServeHTTP(c.Response(), c.Request())

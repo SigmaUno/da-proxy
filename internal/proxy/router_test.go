@@ -397,3 +397,89 @@ func TestTargetURL(t *testing.T) {
 	assert.Equal(t, "http://localhost:26658", r.TargetURL(BackendCelestiaNodeRPC))
 	assert.Equal(t, "", r.TargetURL(Backend("unknown")))
 }
+
+func TestRouter_HeightAwareRouting(t *testing.T) {
+	backends := config.BackendsConfig{
+		CelestiaAppRPC:          "http://localhost:26657",
+		CelestiaAppGRPC:         "localhost:9090",
+		CelestiaAppREST:         "http://localhost:1317",
+		CelestiaNodeRPC:         "http://localhost:26658",
+		CelestiaNodeArchivalRPC: "http://localhost:36658",
+		CelestiaAppArchivalRPC:  "http://localhost:36657",
+		PruningWindow:           1000,
+	}
+
+	ht := NewHeightTracker(1000)
+	ht.SetHead(5000)
+	r := NewRouterWithTracker(backends, ht)
+
+	t.Run("recent height goes to pruned", func(t *testing.T) {
+		body := []byte(`{"jsonrpc":"2.0","id":1,"method":"block","params":["4500"]}`)
+		got, err := r.Route("application/json", "/", body)
+		require.NoError(t, err)
+		assert.Equal(t, BackendCelestiaAppRPC, got.Backend)
+		assert.Equal(t, "http://localhost:26657", got.TargetURL)
+	})
+
+	t.Run("historical height goes to archival app", func(t *testing.T) {
+		body := []byte(`{"jsonrpc":"2.0","id":1,"method":"block","params":["100"]}`)
+		got, err := r.Route("application/json", "/", body)
+		require.NoError(t, err)
+		assert.Equal(t, BackendCelestiaAppArchivalRPC, got.Backend)
+		assert.Equal(t, "http://localhost:36657", got.TargetURL)
+	})
+
+	t.Run("DA historical height goes to archival node", func(t *testing.T) {
+		body := []byte(`{"jsonrpc":"2.0","id":1,"method":"blob.Get","params":[100,"AAAA","AA=="]}`)
+		got, err := r.Route("application/json", "/", body)
+		require.NoError(t, err)
+		assert.Equal(t, BackendCelestiaNodeArchivalRPC, got.Backend)
+		assert.Equal(t, "http://localhost:36658", got.TargetURL)
+	})
+
+	t.Run("DA recent height goes to pruned node", func(t *testing.T) {
+		body := []byte(`{"jsonrpc":"2.0","id":1,"method":"blob.Get","params":[4500,"AAAA","AA=="]}`)
+		got, err := r.Route("application/json", "/", body)
+		require.NoError(t, err)
+		assert.Equal(t, BackendCelestiaNodeRPC, got.Backend)
+		assert.Equal(t, "http://localhost:26658", got.TargetURL)
+	})
+
+	t.Run("no height param goes to pruned", func(t *testing.T) {
+		body := []byte(`{"jsonrpc":"2.0","id":1,"method":"status","params":[]}`)
+		got, err := r.Route("application/json", "/", body)
+		require.NoError(t, err)
+		assert.Equal(t, BackendCelestiaAppRPC, got.Backend)
+	})
+
+	t.Run("latest height (0) goes to pruned", func(t *testing.T) {
+		body := []byte(`{"jsonrpc":"2.0","id":1,"method":"block","params":["0"]}`)
+		got, err := r.Route("application/json", "/", body)
+		require.NoError(t, err)
+		assert.Equal(t, BackendCelestiaAppRPC, got.Backend)
+	})
+}
+
+func TestTargetURL_ArchivalFallback(t *testing.T) {
+	// Without archival configured, archival backends fall back to pruned.
+	backends := defaultBackends()
+	r := NewRouter(backends)
+
+	assert.Equal(t, "http://localhost:26658", r.TargetURL(BackendCelestiaNodeArchivalRPC))
+	assert.Equal(t, "http://localhost:26657", r.TargetURL(BackendCelestiaAppArchivalRPC))
+}
+
+func TestTargetURL_WithArchival(t *testing.T) {
+	backends := config.BackendsConfig{
+		CelestiaAppRPC:          "http://localhost:26657",
+		CelestiaAppGRPC:         "localhost:9090",
+		CelestiaAppREST:         "http://localhost:1317",
+		CelestiaNodeRPC:         "http://localhost:26658",
+		CelestiaNodeArchivalRPC: "http://archival:36658",
+		CelestiaAppArchivalRPC:  "http://archival:36657",
+	}
+	r := NewRouter(backends)
+
+	assert.Equal(t, "http://archival:36658", r.TargetURL(BackendCelestiaNodeArchivalRPC))
+	assert.Equal(t, "http://archival:36657", r.TargetURL(BackendCelestiaAppArchivalRPC))
+}

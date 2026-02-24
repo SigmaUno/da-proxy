@@ -32,24 +32,32 @@ type HealthChecker interface {
 }
 
 type healthChecker struct {
-	backends config.BackendsConfig
-	interval time.Duration
-	metrics  *metrics.Metrics
-	logger   *zap.Logger
-	client   *http.Client
-	mu       sync.RWMutex
-	statuses map[string]HealthStatus
+	backends      config.BackendsConfig
+	interval      time.Duration
+	metrics       *metrics.Metrics
+	logger        *zap.Logger
+	client        *http.Client
+	heightTracker *HeightTracker
+	mu            sync.RWMutex
+	statuses      map[string]HealthStatus
 }
 
 // NewHealthChecker creates a HealthChecker for all configured backends.
-func NewHealthChecker(backends config.BackendsConfig, interval time.Duration, m *metrics.Metrics, logger *zap.Logger) HealthChecker {
+// If a HeightTracker is provided (non-nil), the checker will poll head height
+// on each interval for height-aware routing.
+func NewHealthChecker(backends config.BackendsConfig, interval time.Duration, m *metrics.Metrics, logger *zap.Logger, ht ...*HeightTracker) HealthChecker {
+	var tracker *HeightTracker
+	if len(ht) > 0 {
+		tracker = ht[0]
+	}
 	return &healthChecker{
-		backends: backends,
-		interval: interval,
-		metrics:  m,
-		logger:   logger,
-		client:   &http.Client{Timeout: 5 * time.Second},
-		statuses: make(map[string]HealthStatus),
+		backends:      backends,
+		interval:      interval,
+		metrics:       m,
+		logger:        logger,
+		client:        &http.Client{Timeout: 5 * time.Second},
+		statuses:      make(map[string]HealthStatus),
+		heightTracker: tracker,
 	}
 }
 
@@ -93,6 +101,24 @@ func (h *healthChecker) checkAll() {
 		{"celestia-node-rpc", func() HealthStatus { return h.checkJSONRPC(h.backends.CelestiaNodeRPC) }},
 	}
 
+	// Add archival backends if configured.
+	if h.backends.CelestiaNodeArchivalRPC != "" {
+		checks = append(checks, struct {
+			name string
+			fn   func() HealthStatus
+		}{"celestia-node-archival-rpc", func() HealthStatus {
+			return h.checkJSONRPC(h.backends.CelestiaNodeArchivalRPC)
+		}})
+	}
+	if h.backends.CelestiaAppArchivalRPC != "" {
+		checks = append(checks, struct {
+			name string
+			fn   func() HealthStatus
+		}{"celestia-app-archival-rpc", func() HealthStatus {
+			return h.checkHTTP(h.backends.CelestiaAppArchivalRPC, "/health")
+		}})
+	}
+
 	for _, check := range checks {
 		status := check.fn()
 		status.Backend = check.name
@@ -122,6 +148,40 @@ func (h *healthChecker) checkAll() {
 			}
 		} else if !existed && !status.Healthy {
 			h.logger.Error("backend unreachable on first check", zap.String("backend", check.name), zap.String("error", status.Error))
+		}
+	}
+
+	// Poll head height for height-aware routing.
+	if h.heightTracker != nil && h.heightTracker.Enabled() {
+		h.pollHeadHeight()
+	}
+}
+
+func (h *healthChecker) pollHeadHeight() {
+	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"status","params":[]}`)
+	resp, err := h.client.Post(h.backends.CelestiaAppRPC, "application/json", bytes.NewReader(body))
+	if err != nil {
+		h.logger.Debug("failed to poll head height", zap.Error(err))
+		return
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var result struct {
+		Result struct {
+			SyncInfo struct {
+				LatestBlockHeight string `json:"latest_block_height"`
+			} `json:"sync_info"`
+		} `json:"result"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return
+	}
+
+	if result.Result.SyncInfo.LatestBlockHeight != "" {
+		var height int64
+		if _, err := fmt.Sscanf(result.Result.SyncInfo.LatestBlockHeight, "%d", &height); err == nil && height > 0 {
+			h.heightTracker.SetHead(height)
+			h.logger.Debug("updated head height", zap.Int64("height", height))
 		}
 	}
 }
