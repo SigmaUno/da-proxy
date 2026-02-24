@@ -1,0 +1,65 @@
+# DA-Proxy Prometheus Configuration Template
+#
+# Copy this file into your Prometheus configuration directory and adjust
+# values marked with <CHANGE_ME> as needed.
+#
+# Docs: https://prometheus.io/docs/prometheus/latest/configuration/configuration/
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  scrape_timeout: 10s
+
+# --------------------------------------------------------------------------
+# Alerting -- connect to Alertmanager
+# --------------------------------------------------------------------------
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - "localhost:9093"  # <CHANGE_ME> Alertmanager address
+
+# --------------------------------------------------------------------------
+# Rule files -- load alerting / recording rules
+# --------------------------------------------------------------------------
+rule_files:
+  - "da-proxy-alerts.yml"
+  # Add additional rule files here if needed:
+  # - "da-proxy-recording-rules.yml"
+
+# --------------------------------------------------------------------------
+# Scrape configs
+# --------------------------------------------------------------------------
+scrape_configs:
+  # DA-Proxy metrics endpoint.
+  # The metrics server defaults to :9191 (see internal/metrics/server.go).
+  - job_name: "da-proxy"
+    metrics_path: "/metrics"
+    scheme: "http"
+    static_configs:
+      - targets:
+          - "localhost:9191"  # <CHANGE_ME> DA-Proxy metrics listen address
+        labels:
+          environment: "production"  # <CHANGE_ME> adjust per environment
+
+    # Optional relabel to attach the instance hostname.
+    # relabel_configs:
+    #   - source_labels: [__address__]
+    #     target_label: instance
+
+  # If running multiple DA-Proxy replicas behind a service discovery
+  # mechanism, replace static_configs with the appropriate SD config:
+  #
+  # - job_name: "da-proxy"
+  #   kubernetes_sd_configs:
+  #     - role: pod
+  #       namespaces:
+  #         names:
+  #           - da-proxy
+  #   relabel_configs:
+  #     - source_labels: [__meta_kubernetes_pod_label_app]
+  #       regex: da-proxy
+  #       action: keep
+  #     - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_port]
+  #       target_label: __address__
+  #       replacement: "${1}:9191"

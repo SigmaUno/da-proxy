@@ -1,0 +1,121 @@
+# DA-Proxy Prometheus Alerting Rules
+#
+# These rules monitor the health and performance of the DA-Proxy service.
+# Add this file to your Prometheus configuration via rule_files.
+
+groups:
+  - name: da-proxy.rules
+    rules:
+      # -----------------------------------------------------------------------
+      # DAProxyHighErrorRate
+      # Fires when more than 5% of responses are 5xx over a 5-minute window.
+      # -----------------------------------------------------------------------
+      - alert: DAProxyHighErrorRate
+        expr: |
+          (
+            sum(rate(daproxy_requests_total{status_code=~"5.."}[5m]))
+          /
+            sum(rate(daproxy_requests_total[5m]))
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          service: da-proxy
+        annotations:
+          summary: "DA-Proxy high 5xx error rate"
+          description: >-
+            The 5xx error rate has exceeded 5% for the last 5 minutes.
+            Current value: {{ $value | humanizePercentage }}.
+          runbook_url: "https://runbooks.example.com/da-proxy/high-error-rate"
+
+      # -----------------------------------------------------------------------
+      # DAProxyBackendDown
+      # Fires when a backend health check reports the backend as unreachable.
+      # -----------------------------------------------------------------------
+      - alert: DAProxyBackendDown
+        expr: daproxy_backend_up == 0
+        for: 2m
+        labels:
+          severity: critical
+          service: da-proxy
+        annotations:
+          summary: "DA-Proxy backend {{ $labels.backend }} is down"
+          description: >-
+            Backend {{ $labels.backend }} has been reporting as unreachable
+            for more than 2 minutes.
+          runbook_url: "https://runbooks.example.com/da-proxy/backend-down"
+
+      # -----------------------------------------------------------------------
+      # DAProxyHighLatency
+      # Fires when the p99 request latency exceeds 5 seconds for 5 minutes.
+      # -----------------------------------------------------------------------
+      - alert: DAProxyHighLatency
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(daproxy_request_duration_seconds_bucket[5m])) by (le)
+          ) > 5
+        for: 5m
+        labels:
+          severity: warning
+          service: da-proxy
+        annotations:
+          summary: "DA-Proxy p99 latency is above 5 seconds"
+          description: >-
+            The 99th percentile request latency has been above 5 seconds
+            for the last 5 minutes. Current p99: {{ $value | humanizeDuration }}.
+          runbook_url: "https://runbooks.example.com/da-proxy/high-latency"
+
+      # -----------------------------------------------------------------------
+      # DAProxyRateLimitExhausted
+      # Fires when a token is consistently hitting rate limits.
+      # -----------------------------------------------------------------------
+      - alert: DAProxyRateLimitExhausted
+        expr: |
+          rate(daproxy_rate_limit_hits_total[1m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          service: da-proxy
+        annotations:
+          summary: "DA-Proxy token {{ $labels.token_name }} is exhausting rate limits"
+          description: >-
+            Token {{ $labels.token_name }} has been hitting rate limits at a rate
+            of more than 10 hits/minute for the last 5 minutes. Current rate:
+            {{ $value | printf "%.1f" }} hits/min.
+          runbook_url: "https://runbooks.example.com/da-proxy/rate-limit-exhausted"
+
+      # -----------------------------------------------------------------------
+      # DAProxyHighGoroutines
+      # Fires when the Go runtime goroutine count is abnormally high.
+      # -----------------------------------------------------------------------
+      - alert: DAProxyHighGoroutines
+        expr: go_goroutines{job="da-proxy"} > 10000
+        for: 5m
+        labels:
+          severity: warning
+          service: da-proxy
+        annotations:
+          summary: "DA-Proxy goroutine count exceeds 10,000"
+          description: >-
+            The number of goroutines in the DA-Proxy process has exceeded 10,000
+            for the last 5 minutes. This may indicate a goroutine leak.
+            Current count: {{ $value }}.
+          runbook_url: "https://runbooks.example.com/da-proxy/high-goroutines"
+
+      # -----------------------------------------------------------------------
+      # DAProxyBackendHighLatency
+      # Fires when backend health check round-trip time is above 2 seconds.
+      # -----------------------------------------------------------------------
+      - alert: DAProxyBackendHighLatency
+        expr: daproxy_backend_health_check_duration_seconds > 2
+        for: 3m
+        labels:
+          severity: warning
+          service: da-proxy
+        annotations:
+          summary: "DA-Proxy backend {{ $labels.backend }} health check latency is high"
+          description: >-
+            Health check round-trip time for backend {{ $labels.backend }} has
+            been above 2 seconds for the last 3 minutes. Current duration:
+            {{ $value | humanizeDuration }}.
+          runbook_url: "https://runbooks.example.com/da-proxy/backend-high-latency"

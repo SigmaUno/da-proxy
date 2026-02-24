@@ -1,0 +1,134 @@
+# DA-Proxy Alertmanager Configuration Template
+#
+# Copy this file into your Alertmanager configuration directory and replace
+# the placeholder values (marked with <CHANGE_ME>) with your actual settings.
+#
+# Docs: https://prometheus.io/docs/alerting/latest/configuration/
+
+global:
+  # How long to wait before sending a notification again if it has already
+  # been sent for an identical alert group.
+  resolve_timeout: 5m
+
+  # --- Slack (uncomment and fill in) ---
+  # slack_api_url: "https://hooks.slack.com/services/<CHANGE_ME>"
+
+  # --- Email / SMTP (uncomment and fill in) ---
+  # smtp_smarthost: "smtp.example.com:587"
+  # smtp_from: "alertmanager@example.com"
+  # smtp_auth_username: "<CHANGE_ME>"
+  # smtp_auth_password: "<CHANGE_ME>"
+  # smtp_require_tls: true
+
+# --------------------------------------------------------------------------
+# Templates
+# --------------------------------------------------------------------------
+# Point to custom notification templates if desired.
+# templates:
+#   - "/etc/alertmanager/templates/*.tmpl"
+
+# --------------------------------------------------------------------------
+# Route tree
+# --------------------------------------------------------------------------
+route:
+  # The top-level route: all alerts enter here.
+  receiver: default-receiver
+  group_by: ["alertname", "service", "backend"]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+
+  routes:
+    # Critical alerts fire immediately with a short group wait.
+    - matchers:
+        - severity="critical"
+      receiver: critical-receiver
+      group_wait: 10s
+      group_interval: 1m
+      repeat_interval: 1h
+      continue: false
+
+    # Warning alerts use a longer group wait to reduce noise.
+    - matchers:
+        - severity="warning"
+      receiver: warning-receiver
+      group_wait: 5m
+      group_interval: 10m
+      repeat_interval: 4h
+      continue: false
+
+# --------------------------------------------------------------------------
+# Inhibition rules
+# --------------------------------------------------------------------------
+inhibit_rules:
+  # If a critical alert is firing for a backend, suppress any warning-level
+  # alert for the same backend to avoid duplicate noise.
+  - source_matchers:
+      - severity="critical"
+    target_matchers:
+      - severity="warning"
+    equal: ["service", "backend"]
+
+  # Backend-down inhibits rate-limit and latency warnings for the same backend
+  # since both are expected when the backend is unreachable.
+  - source_matchers:
+      - alertname="DAProxyBackendDown"
+    target_matchers:
+      - alertname=~"DAProxyHighLatency|DAProxyBackendHighLatency"
+    equal: ["backend"]
+
+# --------------------------------------------------------------------------
+# Receivers
+# --------------------------------------------------------------------------
+receivers:
+  # Fallback receiver -- catches anything that does not match a child route.
+  - name: default-receiver
+    # Uncomment and configure at least one contact method.
+    # slack_configs:
+    #   - channel: "#da-proxy-alerts"
+    #     send_resolved: true
+    #     title: '{{ template "slack.default.title" . }}'
+    #     text: '{{ template "slack.default.text" . }}'
+
+  # Receiver for critical alerts -- page on-call immediately.
+  - name: critical-receiver
+    # --- PagerDuty (uncomment and fill in) ---
+    # pagerduty_configs:
+    #   - service_key: "<CHANGE_ME>"
+    #     severity: critical
+    #     description: '{{ .CommonAnnotations.summary }}'
+    #     details:
+    #       firing: '{{ .Alerts.Firing | len }}'
+    #       description: '{{ .CommonAnnotations.description }}'
+
+    # --- Slack (uncomment and fill in) ---
+    # slack_configs:
+    #   - channel: "#da-proxy-critical"
+    #     send_resolved: true
+    #     color: '{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}'
+    #     title: "[CRITICAL] {{ .CommonAnnotations.summary }}"
+    #     text: "{{ .CommonAnnotations.description }}"
+
+    # --- Email (uncomment and fill in) ---
+    # email_configs:
+    #   - to: "oncall@example.com"
+    #     send_resolved: true
+    #     headers:
+    #       Subject: "[CRITICAL] DA-Proxy: {{ .CommonAnnotations.summary }}"
+
+  # Receiver for warning alerts.
+  - name: warning-receiver
+    # --- Slack (uncomment and fill in) ---
+    # slack_configs:
+    #   - channel: "#da-proxy-alerts"
+    #     send_resolved: true
+    #     color: '{{ if eq .Status "firing" }}warning{{ else }}good{{ end }}'
+    #     title: "[WARNING] {{ .CommonAnnotations.summary }}"
+    #     text: "{{ .CommonAnnotations.description }}"
+
+    # --- Email (uncomment and fill in) ---
+    # email_configs:
+    #   - to: "team@example.com"
+    #     send_resolved: true
+    #     headers:
+    #       Subject: "[WARNING] DA-Proxy: {{ .CommonAnnotations.summary }}"
