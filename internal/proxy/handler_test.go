@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 
+	"github.com/SigmaUno/da-proxy/internal/auth"
 	"github.com/SigmaUno/da-proxy/internal/config"
 	"github.com/SigmaUno/da-proxy/internal/middleware"
 )
@@ -190,6 +191,135 @@ func TestHandler_EmptyBody(t *testing.T) {
 
 	// Empty body defaults to Tendermint RPC backend (supports GET-style requests).
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func setupHandlerTestWithTokenInfo(t *testing.T, info auth.TokenInfo, backendHandler http.HandlerFunc) *echo.Echo {
+	t.Helper()
+	backend := httptest.NewServer(backendHandler)
+	t.Cleanup(backend.Close)
+
+	backends := config.BackendsConfig{
+		CelestiaAppRPC:  backend.URL,
+		CelestiaAppGRPC: backend.Listener.Addr().String(),
+		CelestiaAppREST: backend.URL,
+		CelestiaNodeRPC: backend.URL,
+	}
+
+	router := NewRouter(backends)
+	handler := NewHandler(router, 10*1024*1024, zap.NewNop())
+
+	e := echo.New()
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			c.Set(middleware.ContextKeyRequestID, "test-request-id")
+			c.Set(middleware.ContextKeyTokenInfo, info)
+			return next(c)
+		}
+	})
+	e.Any("/*", handler.HandleRequest)
+	return e
+}
+
+func TestHandler_MethodAuth_ReadOnlyBlocksWrite(t *testing.T) {
+	info := auth.TokenInfo{
+		Name:    "readonly-token",
+		Enabled: true,
+		Scope:   "read-only",
+	}
+
+	e := setupHandlerTestWithTokenInfo(t, info, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":{},"id":1}`))
+	})
+
+	body := `{"jsonrpc":"2.0","id":1,"method":"broadcast_tx_sync","params":["abc"]}`
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestHandler_MethodAuth_ReadOnlyAllowsRead(t *testing.T) {
+	info := auth.TokenInfo{
+		Name:    "readonly-token",
+		Enabled: true,
+		Scope:   "read-only",
+	}
+
+	e := setupHandlerTestWithTokenInfo(t, info, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":{},"id":1}`))
+	})
+
+	body := `{"jsonrpc":"2.0","id":1,"method":"status","params":[]}`
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestHandler_MethodAuth_AllowlistBlocks(t *testing.T) {
+	info := auth.TokenInfo{
+		Name:           "restricted-token",
+		Enabled:        true,
+		Scope:          "write",
+		AllowedMethods: []string{"blob.Get", "blob.Submit"},
+	}
+
+	e := setupHandlerTestWithTokenInfo(t, info, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":{},"id":1}`))
+	})
+
+	body := `{"jsonrpc":"2.0","id":1,"method":"status","params":[]}`
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusForbidden, rec.Code)
+}
+
+func TestHandler_MethodAuth_AllowlistPermits(t *testing.T) {
+	info := auth.TokenInfo{
+		Name:           "restricted-token",
+		Enabled:        true,
+		Scope:          "write",
+		AllowedMethods: []string{"blob.*"},
+	}
+
+	e := setupHandlerTestWithTokenInfo(t, info, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":{"data":"test"},"id":1}`))
+	})
+
+	body := `{"jsonrpc":"2.0","id":1,"method":"blob.Get","params":[1]}`
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+}
+
+func TestHandler_MethodAuth_NoTokenInfo(t *testing.T) {
+	// Without token info in context, method auth is skipped.
+	e, _ := setupHandlerTest(t, func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":{},"id":1}`))
+	})
+
+	body := `{"jsonrpc":"2.0","id":1,"method":"broadcast_tx_sync","params":["abc"]}`
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 

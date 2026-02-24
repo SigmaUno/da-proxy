@@ -10,6 +10,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
 
+	"github.com/SigmaUno/da-proxy/internal/auth"
 	"github.com/SigmaUno/da-proxy/internal/middleware"
 )
 
@@ -63,6 +64,17 @@ func (h *Handler) HandleRequest(c echo.Context) error {
 	// Set context values for logging/metrics middleware.
 	c.Set(middleware.ContextKeyBackend, string(decision.Backend))
 	c.Set(middleware.ContextKeyRPCMethod, decision.Method)
+
+	// Check method authorization against token scope and allowlist.
+	if decision.Method != "" {
+		if infoVal := c.Get(middleware.ContextKeyTokenInfo); infoVal != nil {
+			if info, ok := infoVal.(auth.TokenInfo); ok {
+				if !info.IsMethodAllowed(decision.Method) {
+					return echo.NewHTTPError(http.StatusForbidden, "method not allowed for this token")
+				}
+			}
+		}
+	}
 
 	// Build and execute the reverse proxy.
 	targetURL, err := url.Parse(decision.TargetURL)

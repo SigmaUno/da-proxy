@@ -7,4 +7,5 @@ const (
 	ContextKeyRateLimit = "rate_limit"
 	ContextKeyBackend   = "backend"
 	ContextKeyRPCMethod = "rpc_method"
+	ContextKeyTokenInfo = "token_info"
 )

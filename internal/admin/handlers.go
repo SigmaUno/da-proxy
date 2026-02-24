@@ -24,9 +24,12 @@ func (h *handlers) handleHealth(c echo.Context) error {
 }
 
 func (h *handlers) handleStatus(c echo.Context) error {
-	activeTokens := 0
-	if h.deps.Config != nil {
+	var totalTokens, activeTokens int
+	if h.deps.TokenStore != nil {
+		totalTokens, activeTokens = h.deps.TokenStore.TokenCount()
+	} else if h.deps.Config != nil {
 		for _, t := range h.deps.Config.Tokens {
+			totalTokens++
 			if t.Enabled {
 				activeTokens++
 			}
@@ -36,6 +39,7 @@ func (h *handlers) handleStatus(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"version":        h.deps.Version,
 		"uptime_seconds": time.Since(h.deps.StartTime).Seconds(),
+		"total_tokens":   totalTokens,
 		"active_tokens":  activeTokens,
 	})
 }

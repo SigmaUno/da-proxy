@@ -34,13 +34,18 @@ func Auth(store auth.TokenStore) echo.MiddlewareFunc {
 				return echo.NewHTTPError(http.StatusForbidden, "token is disabled")
 			}
 
+			if info.IsExpired() {
+				return echo.NewHTTPError(http.StatusUnauthorized, "token has expired")
+			}
+
 			// Strip token from path — backends never see it.
 			c.Request().URL.Path = remaining
 			c.Request().URL.RawPath = ""
 
-			// Attach token metadata to context.
+			// Attach token metadata to context for downstream middleware.
 			c.Set(ContextKeyTokenName, info.Name)
 			c.Set(ContextKeyRateLimit, info.RateLimit)
+			c.Set(ContextKeyTokenInfo, info)
 
 			return next(c)
 		}

@@ -32,7 +32,7 @@ func NewServer(cfg config.AdminConfig, deps Dependencies) *Server {
 	if len(cfg.CORSOrigins) > 0 {
 		e.Use(echomw.CORSWithConfig(echomw.CORSConfig{
 			AllowOrigins: cfg.CORSOrigins,
-			AllowMethods: []string{http.MethodGet, http.MethodOptions},
+			AllowMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodOptions},
 			AllowHeaders: []string{echo.HeaderContentType, echo.HeaderAuthorization},
 		}))
 	}
