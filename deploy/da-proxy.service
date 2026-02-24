@@ -1,0 +1,52 @@
+[Unit]
+Description=DA-Proxy - Celestia RPC reverse proxy gateway
+Documentation=https://github.com/SigmaUno/da-proxy
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/da-proxy -config /etc/da-proxy/config.yaml
+
+# Restart policy
+Restart=on-failure
+RestartSec=5s
+
+# Runtime
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/data/da-proxy
+
+# Allow binding to privileged ports (443) and reading Let's Encrypt certs
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+ReadOnlyPaths=/etc/letsencrypt
+
+# Security hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictRealtime=true
+
+# Writable paths for SQLite databases (tokens.db, logs.db)
+ReadWritePaths=/data/da-proxy
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=da-proxy
+
+# Resource limits
+LimitNOFILE=65535
+
+[Install]
+WantedBy=multi-user.target

@@ -2,10 +2,12 @@ package proxy
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
@@ -59,6 +61,7 @@ func WithCache(c cache.Cache) HandlerOption {
 func (h *Handler) HandleRequest(c echo.Context) error {
 	req := c.Request()
 	path := req.URL.Path
+	rawQuery := req.URL.RawQuery
 
 	// Read and buffer the request body for method inspection.
 	var body []byte
@@ -97,8 +100,13 @@ func (h *Handler) HandleRequest(c echo.Context) error {
 		}
 	}
 
-	// Cache lookup for cacheable historical queries.
+	// Determine height from body (JSON-RPC) or query string (GET).
 	height := ExtractHeight(decision.Method, body)
+	if height == 0 {
+		height = ExtractHeightFromQuery(rawQuery)
+	}
+
+	// Cache lookup for cacheable historical queries.
 	if cache.IsCacheable(decision.Method, height) {
 		if cached, hit := h.cache.Get(req.Context(), decision.Method, height, body); hit {
 			resp := c.Response()
@@ -128,41 +136,123 @@ func (h *Handler) HandleRequest(c echo.Context) error {
 	// Determine if we should capture the response for caching.
 	shouldCache := cache.IsCacheable(decision.Method, height)
 
-	proxy := &httputil.ReverseProxy{
-		Director: func(outReq *http.Request) {
-			outReq.URL.Scheme = targetURL.Scheme
-			outReq.URL.Host = targetURL.Host
-			outReq.Host = targetURL.Host
+	// Check whether archival fallback is possible for this request.
+	canFallback := height > 0 && h.router.HasArchivalBackend(decision.Backend)
 
-			// Preserve the request path (e.g. /health, /status for GET).
-			// For JSON-RPC POST requests, path is just "/".
-			if path != "" && path != "/" {
-				outReq.URL.Path = path
-			} else {
-				outReq.URL.Path = "/"
-			}
+	if canFallback {
+		return h.proxyWithFallback(c, req, decision, targetURL, path, rawQuery, body, height, shouldCache)
+	}
 
-			// Replay the buffered body.
-			if body != nil {
-				outReq.Body = io.NopCloser(bytes.NewReader(body))
-				outReq.ContentLength = int64(len(body))
-			}
-		},
+	return h.proxyDirect(c, req, decision, targetURL, path, rawQuery, body, height, shouldCache)
+}
+
+// proxyDirect sends the request to a single backend with no fallback.
+func (h *Handler) proxyDirect(c echo.Context, req *http.Request, decision RouteDecision, targetURL *url.URL, path, rawQuery string, body []byte, height int64, shouldCache bool) error {
+	proxy := h.buildProxy(c, req, decision, targetURL, path, rawQuery, body, height, shouldCache)
+	proxy.ServeHTTP(c.Response(), req)
+	return nil
+}
+
+// proxyWithFallback tries the primary backend first. If the response indicates
+// the block was pruned, it retries against the archival backend.
+func (h *Handler) proxyWithFallback(c echo.Context, req *http.Request, decision RouteDecision, targetURL *url.URL, path, rawQuery string, body []byte, height int64, shouldCache bool) error {
+	// Execute against the primary backend into a buffer.
+	buf := newBufferedResponseWriter()
+	proxy := h.buildRawProxy(targetURL, path, rawQuery, body, decision.Backend)
+	proxy.ServeHTTP(buf, req)
+
+	// Check if the response indicates a pruned/missing block.
+	if !isPrunedError(buf.statusCode, buf.body.Bytes()) {
+		// Primary succeeded (or non-pruning error), flush to client.
+		return h.flushBuffered(c, buf, decision.Backend, decision.Method, height, body, shouldCache)
+	}
+
+	h.logger.Info("pruned backend returned block-not-found, retrying with archival",
+		zap.String("backend", string(decision.Backend)),
+		zap.Int64("height", height),
+	)
+
+	// Retry against archival backend.
+	archivalBackend := h.router.ArchivalBackendFor(decision.Backend)
+	archivalURL := h.router.TargetURL(archivalBackend)
+	archivalTarget, err := url.Parse(archivalURL)
+	if err != nil {
+		h.logger.Error("invalid archival backend URL",
+			zap.String("backend", string(archivalBackend)),
+			zap.String("url", archivalURL),
+			zap.Error(err),
+		)
+		// Fall back to the original (pruned) response.
+		return h.flushBuffered(c, buf, decision.Backend, decision.Method, height, body, shouldCache)
+	}
+
+	// Reset request body for replay.
+	if body != nil {
+		req.Body = io.NopCloser(bytes.NewReader(body))
+	}
+
+	archivalBuf := newBufferedResponseWriter()
+	archivalProxy := h.buildRawProxy(archivalTarget, path, rawQuery, body, archivalBackend)
+	archivalProxy.ServeHTTP(archivalBuf, req)
+
+	// Update context to reflect the actual backend used.
+	c.Set(middleware.ContextKeyBackend, string(archivalBackend))
+
+	return h.flushBuffered(c, archivalBuf, archivalBackend, decision.Method, height, body, shouldCache)
+}
+
+// flushBuffered writes a buffered proxy response to the real Echo response,
+// adding our custom headers and optionally caching.
+func (h *Handler) flushBuffered(c echo.Context, buf *bufferedResponseWriter, backend Backend, method string, height int64, reqBody []byte, shouldCache bool) error {
+	resp := c.Response()
+	reqID, _ := c.Get(middleware.ContextKeyRequestID).(string)
+
+	// Copy backend response headers.
+	for k, vals := range buf.header {
+		for _, v := range vals {
+			resp.Header().Set(k, v)
+		}
+	}
+
+	// Add our custom headers.
+	if reqID != "" {
+		resp.Header().Set(middleware.HeaderXRequestID, reqID)
+	}
+	resp.Header().Set(HeaderXDABackend, string(backend))
+
+	respBytes := buf.body.Bytes()
+
+	// Cache successful, non-pruning-error responses.
+	if shouldCache && buf.statusCode == http.StatusOK && !isPrunedError(buf.statusCode, respBytes) {
+		resp.Header().Set(HeaderXCacheStatus, "MISS")
+		h.cache.Set(c.Request().Context(), method, height, reqBody, respBytes)
+	}
+
+	resp.WriteHeader(buf.statusCode)
+	_, _ = resp.Write(respBytes)
+	return nil
+}
+
+// buildProxy creates a reverse proxy with full header decoration, caching,
+// and error handling for the direct (non-fallback) path.
+func (h *Handler) buildProxy(c echo.Context, req *http.Request, decision RouteDecision, targetURL *url.URL, path, rawQuery string, body []byte, height int64, shouldCache bool) *httputil.ReverseProxy {
+	return &httputil.ReverseProxy{
+		Director: h.director(targetURL, path, rawQuery, body),
 		ModifyResponse: func(resp *http.Response) error {
-			// Add our response headers.
 			reqID, _ := c.Get(middleware.ContextKeyRequestID).(string)
 			if reqID != "" {
 				resp.Header.Set(middleware.HeaderXRequestID, reqID)
 			}
 			resp.Header.Set(HeaderXDABackend, string(decision.Backend))
 
-			// Cache successful responses for cacheable methods.
 			if shouldCache && resp.StatusCode == http.StatusOK {
-				resp.Header.Set(HeaderXCacheStatus, "MISS")
 				respBody, readErr := io.ReadAll(resp.Body)
 				_ = resp.Body.Close()
 				if readErr == nil {
-					h.cache.Set(req.Context(), decision.Method, height, body, respBody)
+					if !isPrunedError(resp.StatusCode, respBody) {
+						resp.Header.Set(HeaderXCacheStatus, "MISS")
+						h.cache.Set(req.Context(), decision.Method, height, body, respBody)
+					}
 					resp.Body = io.NopCloser(bytes.NewReader(respBody))
 					resp.ContentLength = int64(len(respBody))
 				}
@@ -179,7 +269,98 @@ func (h *Handler) HandleRequest(c echo.Context) error {
 			_, _ = w.Write([]byte(`{"error":"backend unavailable"}`))
 		},
 	}
+}
 
-	proxy.ServeHTTP(c.Response(), req)
-	return nil
+// buildRawProxy creates a reverse proxy without custom header decoration,
+// used for the fallback path where we buffer and inspect the response.
+func (h *Handler) buildRawProxy(targetURL *url.URL, path, rawQuery string, body []byte, backend Backend) *httputil.ReverseProxy {
+	return &httputil.ReverseProxy{
+		Director: h.director(targetURL, path, rawQuery, body),
+		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, proxyErr error) {
+			h.logger.Error("backend proxy error",
+				zap.String("backend", string(backend)),
+				zap.Error(proxyErr),
+			)
+			w.WriteHeader(http.StatusBadGateway)
+			_, _ = w.Write([]byte(`{"error":"backend unavailable"}`))
+		},
+	}
+}
+
+// director returns the Director function for httputil.ReverseProxy.
+func (h *Handler) director(targetURL *url.URL, path, rawQuery string, body []byte) func(*http.Request) {
+	return func(outReq *http.Request) {
+		outReq.URL.Scheme = targetURL.Scheme
+		outReq.URL.Host = targetURL.Host
+		outReq.Host = targetURL.Host
+
+		if path != "" && path != "/" {
+			outReq.URL.Path = path
+		} else {
+			outReq.URL.Path = "/"
+		}
+
+		outReq.URL.RawQuery = rawQuery
+
+		if body != nil {
+			outReq.Body = io.NopCloser(bytes.NewReader(body))
+			outReq.ContentLength = int64(len(body))
+		}
+	}
+}
+
+// bufferedResponseWriter captures an HTTP response in memory.
+type bufferedResponseWriter struct {
+	header     http.Header
+	body       bytes.Buffer
+	statusCode int
+}
+
+func newBufferedResponseWriter() *bufferedResponseWriter {
+	return &bufferedResponseWriter{
+		header:     make(http.Header),
+		statusCode: http.StatusOK,
+	}
+}
+
+func (w *bufferedResponseWriter) Header() http.Header {
+	return w.header
+}
+
+func (w *bufferedResponseWriter) Write(b []byte) (int, error) {
+	return w.body.Write(b)
+}
+
+func (w *bufferedResponseWriter) WriteHeader(code int) {
+	w.statusCode = code
+}
+
+// isPrunedError returns true when the response indicates the block was pruned
+// or not available on the node. Tendermint returns HTTP 200 with a JSON error
+// body for these cases.
+func isPrunedError(statusCode int, body []byte) bool {
+	if statusCode != http.StatusOK {
+		return false
+	}
+	if len(body) == 0 {
+		return false
+	}
+
+	var resp struct {
+		Error json.RawMessage `json:"error"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return false
+	}
+	if len(resp.Error) == 0 || string(resp.Error) == "null" {
+		return false
+	}
+
+	errStr := strings.ToLower(string(resp.Error))
+	return strings.Contains(errStr, "is not available") ||
+		strings.Contains(errStr, "block not found") ||
+		strings.Contains(errStr, "header not found") ||
+		strings.Contains(errStr, "lowest height is") ||
+		strings.Contains(errStr, "height must be less than or equal") ||
+		strings.Contains(errStr, "could not find results")
 }

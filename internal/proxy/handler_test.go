@@ -492,3 +492,211 @@ func TestHandler_Cache_Bypass_LatestHeight(t *testing.T) {
 	assert.Equal(t, 0, mc.sets)
 	mc.mu.Unlock()
 }
+
+func TestIsPrunedError(t *testing.T) {
+	tests := []struct {
+		name       string
+		statusCode int
+		body       string
+		expected   bool
+	}{
+		{
+			"not found error",
+			200,
+			`{"jsonrpc":"2.0","error":{"code":-32603,"message":"Internal error","data":"block not found"},"id":1}`,
+			true,
+		},
+		{
+			"height not available",
+			200,
+			`{"jsonrpc":"2.0","error":{"code":-32603,"message":"Internal error","data":"height 286001 is not available, lowest height is 1500000"},"id":1}`,
+			true,
+		},
+		{
+			"lowest height is",
+			200,
+			`{"jsonrpc":"2.0","error":{"code":-32603,"message":"Internal error","data":"lowest height is 1000"},"id":1}`,
+			true,
+		},
+		{
+			"height must be less than or equal",
+			200,
+			`{"jsonrpc":"2.0","error":{"code":-32603,"message":"height must be less than or equal to the current blockchain height"},"id":1}`,
+			true,
+		},
+		{
+			"could not find results",
+			200,
+			`{"jsonrpc":"2.0","error":{"code":-32603,"message":"could not find results for height #286001"},"id":1}`,
+			true,
+		},
+		{
+			"success response (no error)",
+			200,
+			`{"jsonrpc":"2.0","result":{"block":{}},"id":1}`,
+			false,
+		},
+		{
+			"null error field",
+			200,
+			`{"jsonrpc":"2.0","error":null,"result":{},"id":1}`,
+			false,
+		},
+		{
+			"non-200 status",
+			502,
+			`{"error":"backend unavailable"}`,
+			false,
+		},
+		{
+			"empty body",
+			200,
+			"",
+			false,
+		},
+		{
+			"unrelated error",
+			200,
+			`{"jsonrpc":"2.0","error":{"code":-32601,"message":"method not found"},"id":1}`,
+			false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, isPrunedError(tt.statusCode, []byte(tt.body)))
+		})
+	}
+}
+
+func TestHandler_QueryStringForwarded(t *testing.T) {
+	var receivedQuery string
+	var receivedPath string
+	e, _ := setupHandlerTest(t, func(w http.ResponseWriter, r *http.Request) {
+		receivedPath = r.URL.Path
+		receivedQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":{"block":{}},"id":1}`))
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/block?height=286001", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, "/block", receivedPath)
+	assert.Equal(t, "height=286001", receivedQuery)
+}
+
+func TestHandler_FallbackToArchival(t *testing.T) {
+	// Set up two backends: pruned returns block-not-found, archival returns success.
+	pruned := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","error":{"code":-32603,"message":"Internal error","data":"height 286001 is not available, lowest height is 1500000"},"id":1}`))
+	}))
+	t.Cleanup(pruned.Close)
+
+	archival := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":{"block":{"header":{"height":"286001"}}},"id":1}`))
+	}))
+	t.Cleanup(archival.Close)
+
+	backends := config.BackendsConfig{
+		CelestiaAppRPC:         config.Endpoints{pruned.URL},
+		CelestiaNodeRPC:        config.Endpoints{pruned.URL},
+		CelestiaAppArchivalRPC: config.Endpoints{archival.URL},
+	}
+
+	router := NewRouter(backends)
+	handler := NewHandler(router, 10*1024*1024, zap.NewNop())
+
+	e := echo.New()
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			c.Set(middleware.ContextKeyRequestID, "test-request-id")
+			return next(c)
+		}
+	})
+	e.Any("/*", handler.HandleRequest)
+
+	// GET request with height in query string.
+	req := httptest.NewRequest(http.MethodGet, "/block?height=286001", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	respBody, err := io.ReadAll(rec.Body)
+	require.NoError(t, err)
+	assert.Contains(t, string(respBody), "286001")
+	assert.Equal(t, "celestia-app-archival-rpc", rec.Header().Get(HeaderXDABackend))
+}
+
+func TestHandler_FallbackNotTriggeredOnSuccess(t *testing.T) {
+	callCount := 0
+	pruned := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		callCount++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":{"block":{"header":{"height":"286001"}}},"id":1}`))
+	}))
+	t.Cleanup(pruned.Close)
+
+	archival := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) {
+		t.Error("archival backend should not be called")
+	}))
+	t.Cleanup(archival.Close)
+
+	backends := config.BackendsConfig{
+		CelestiaAppRPC:         config.Endpoints{pruned.URL},
+		CelestiaNodeRPC:        config.Endpoints{pruned.URL},
+		CelestiaAppArchivalRPC: config.Endpoints{archival.URL},
+	}
+
+	router := NewRouter(backends)
+	handler := NewHandler(router, 10*1024*1024, zap.NewNop())
+
+	e := echo.New()
+	e.Any("/*", handler.HandleRequest)
+
+	req := httptest.NewRequest(http.MethodGet, "/block?height=286001", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	assert.Equal(t, 1, callCount, "should only call pruned backend once")
+}
+
+func TestHandler_NoFallbackWithoutArchivalConfig(t *testing.T) {
+	// Without archival backend configured, pruned error should pass through.
+	pruned := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","error":{"code":-32603,"message":"Internal error","data":"height 286001 is not available, lowest height is 1500000"},"id":1}`))
+	}))
+	t.Cleanup(pruned.Close)
+
+	backends := config.BackendsConfig{
+		CelestiaAppRPC:  config.Endpoints{pruned.URL},
+		CelestiaNodeRPC: config.Endpoints{pruned.URL},
+		// No archival backends configured.
+	}
+
+	router := NewRouter(backends)
+	handler := NewHandler(router, 10*1024*1024, zap.NewNop())
+
+	e := echo.New()
+	e.Any("/*", handler.HandleRequest)
+
+	req := httptest.NewRequest(http.MethodGet, "/block?height=286001", nil)
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+	respBody, _ := io.ReadAll(rec.Body)
+	assert.Contains(t, string(respBody), "is not available")
+}

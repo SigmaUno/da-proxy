@@ -42,6 +42,8 @@ type Router interface {
 	Route(body []byte) (RouteDecision, error)
 	TargetURL(backend Backend) string
 	GetHeightTracker() *HeightTracker
+	ArchivalBackendFor(backend Backend) Backend
+	HasArchivalBackend(backend Backend) bool
 }
 
 type router struct {
@@ -142,6 +144,24 @@ func (r *router) resolveBackend(method string) Backend {
 
 func (r *router) GetHeightTracker() *HeightTracker {
 	return r.heightTracker
+}
+
+// ArchivalBackendFor maps a pruned backend to its archival equivalent.
+func (r *router) ArchivalBackendFor(pruned Backend) Backend {
+	return r.archivalBackend(pruned)
+}
+
+// HasArchivalBackend returns true if the archival variant of the given backend
+// has endpoints configured (i.e. it won't just fall back to the pruned node).
+func (r *router) HasArchivalBackend(backend Backend) bool {
+	archival := r.archivalBackend(backend)
+	if archival == backend {
+		return false // no archival mapping exists
+	}
+	if bal, ok := r.balancers[archival]; ok && bal.Len() > 0 {
+		return true
+	}
+	return false
 }
 
 // archivalBackend maps a pruned backend to its archival equivalent.

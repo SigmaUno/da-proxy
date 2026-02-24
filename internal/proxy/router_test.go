@@ -363,3 +363,44 @@ func TestTargetURL_WithArchival(t *testing.T) {
 	assert.Equal(t, "http://archival:36658", r.TargetURL(BackendCelestiaNodeArchivalRPC))
 	assert.Equal(t, "http://archival:36657", r.TargetURL(BackendCelestiaAppArchivalRPC))
 }
+
+func TestArchivalBackendFor(t *testing.T) {
+	r := NewRouter(defaultBackends())
+
+	assert.Equal(t, BackendCelestiaAppArchivalRPC, r.ArchivalBackendFor(BackendCelestiaAppRPC))
+	assert.Equal(t, BackendCelestiaNodeArchivalRPC, r.ArchivalBackendFor(BackendCelestiaNodeRPC))
+	// Archival backends map to themselves.
+	assert.Equal(t, BackendCelestiaAppArchivalRPC, r.ArchivalBackendFor(BackendCelestiaAppArchivalRPC))
+	assert.Equal(t, BackendCelestiaNodeArchivalRPC, r.ArchivalBackendFor(BackendCelestiaNodeArchivalRPC))
+}
+
+func TestHasArchivalBackend(t *testing.T) {
+	t.Run("without archival configured", func(t *testing.T) {
+		r := NewRouter(defaultBackends())
+		assert.False(t, r.HasArchivalBackend(BackendCelestiaAppRPC))
+		assert.False(t, r.HasArchivalBackend(BackendCelestiaNodeRPC))
+	})
+
+	t.Run("with archival configured", func(t *testing.T) {
+		backends := config.BackendsConfig{
+			CelestiaAppRPC:          config.Endpoints{"http://localhost:26657"},
+			CelestiaNodeRPC:         config.Endpoints{"http://localhost:26658"},
+			CelestiaAppArchivalRPC:  config.Endpoints{"http://archival:36657"},
+			CelestiaNodeArchivalRPC: config.Endpoints{"http://archival:36658"},
+		}
+		r := NewRouter(backends)
+		assert.True(t, r.HasArchivalBackend(BackendCelestiaAppRPC))
+		assert.True(t, r.HasArchivalBackend(BackendCelestiaNodeRPC))
+	})
+
+	t.Run("partial archival configured", func(t *testing.T) {
+		backends := config.BackendsConfig{
+			CelestiaAppRPC:         config.Endpoints{"http://localhost:26657"},
+			CelestiaNodeRPC:        config.Endpoints{"http://localhost:26658"},
+			CelestiaAppArchivalRPC: config.Endpoints{"http://archival:36657"},
+		}
+		r := NewRouter(backends)
+		assert.True(t, r.HasArchivalBackend(BackendCelestiaAppRPC))
+		assert.False(t, r.HasArchivalBackend(BackendCelestiaNodeRPC))
+	})
+}

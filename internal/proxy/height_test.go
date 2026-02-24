@@ -123,6 +123,29 @@ func TestExtractHeight(t *testing.T) {
 	}
 }
 
+func TestExtractHeightFromQuery(t *testing.T) {
+	tests := []struct {
+		name     string
+		query    string
+		expected int64
+	}{
+		{"height present", "height=286001", 286001},
+		{"height with other params", "height=100&foo=bar", 100},
+		{"no height", "foo=bar", 0},
+		{"empty query", "", 0},
+		{"height zero", "height=0", 0},
+		{"height negative", "height=-1", -1},
+		{"height non-numeric", "height=abc", 0},
+		{"height empty value", "height=", 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, ExtractHeightFromQuery(tt.query))
+		})
+	}
+}
+
 func TestParseHeight(t *testing.T) {
 	tests := []struct {
 		name     string

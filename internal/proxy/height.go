@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -120,6 +121,27 @@ func ExtractHeight(method string, body []byte) int64 {
 	}
 
 	return 0
+}
+
+// ExtractHeightFromQuery parses the "height" query parameter from a raw query
+// string (e.g. "height=286001"). Returns 0 if no height is present.
+func ExtractHeightFromQuery(rawQuery string) int64 {
+	if rawQuery == "" {
+		return 0
+	}
+	vals, err := url.ParseQuery(rawQuery)
+	if err != nil {
+		return 0
+	}
+	h := vals.Get("height")
+	if h == "" {
+		return 0
+	}
+	height, err := strconv.ParseInt(h, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return height
 }
 
 // parseHeight parses a height value from a JSON value.
