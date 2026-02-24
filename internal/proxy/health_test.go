@@ -38,9 +38,9 @@ func TestHealthChecker_HealthyBackends(t *testing.T) {
 	defer nodeRPC.Close()
 
 	backends := config.BackendsConfig{
-		CelestiaAppRPC:      appRPC.URL,
-		CelestiaAppREST:     appREST.URL,
-		CelestiaNodeRPC:     nodeRPC.URL,
+		CelestiaAppRPC:      config.Endpoints{appRPC.URL},
+		CelestiaAppREST:     config.Endpoints{appREST.URL},
+		CelestiaNodeRPC:     config.Endpoints{nodeRPC.URL},
 		HealthCheckInterval: time.Second,
 	}
 
@@ -71,9 +71,9 @@ func TestHealthChecker_HealthyBackends(t *testing.T) {
 
 func TestHealthChecker_UnhealthyBackend(t *testing.T) {
 	backends := config.BackendsConfig{
-		CelestiaAppRPC:      "http://127.0.0.1:1",
-		CelestiaAppREST:     "http://127.0.0.1:1",
-		CelestiaNodeRPC:     "http://127.0.0.1:1",
+		CelestiaAppRPC:      config.Endpoints{"http://127.0.0.1:1"},
+		CelestiaAppREST:     config.Endpoints{"http://127.0.0.1:1"},
+		CelestiaNodeRPC:     config.Endpoints{"http://127.0.0.1:1"},
 		HealthCheckInterval: time.Second,
 	}
 
@@ -106,9 +106,9 @@ func TestHealthChecker_MetricsUpdated(t *testing.T) {
 	defer healthy.Close()
 
 	backends := config.BackendsConfig{
-		CelestiaAppRPC:      healthy.URL,
-		CelestiaAppREST:     healthy.URL,
-		CelestiaNodeRPC:     healthy.URL,
+		CelestiaAppRPC:      config.Endpoints{healthy.URL},
+		CelestiaAppREST:     config.Endpoints{healthy.URL},
+		CelestiaNodeRPC:     config.Endpoints{healthy.URL},
 		HealthCheckInterval: time.Second,
 	}
 
@@ -153,9 +153,9 @@ func TestHealthChecker_StateChangeLogged(t *testing.T) {
 	defer srv.Close()
 
 	backends := config.BackendsConfig{
-		CelestiaAppRPC:      srv.URL,
-		CelestiaAppREST:     srv.URL,
-		CelestiaNodeRPC:     srv.URL,
+		CelestiaAppRPC:      config.Endpoints{srv.URL},
+		CelestiaAppREST:     config.Endpoints{srv.URL},
+		CelestiaNodeRPC:     config.Endpoints{srv.URL},
 		HealthCheckInterval: 200 * time.Millisecond,
 	}
 

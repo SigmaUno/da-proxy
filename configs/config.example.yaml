@@ -15,11 +15,25 @@ metrics:
   enabled: true
 
 backends:
+  # Single endpoint (string) or multiple endpoints (list) per backend.
   celestia_app_rpc: "http://127.0.0.1:26657"
   celestia_app_grpc: "127.0.0.1:9090"
   celestia_app_rest: "http://127.0.0.1:1317"
   celestia_node_rpc: "http://127.0.0.1:26658"
   health_check_interval: 30s
+
+  # Multiple endpoints example (round-robin load balancing):
+  # celestia_app_rpc:
+  #   - "http://app-node-1:26657"
+  #   - "http://app-node-2:26657"
+  # celestia_node_rpc:
+  #   - "http://da-node-1:26658"
+  #   - "http://da-node-2:26658"
+
+  # Archival nodes for historical queries (optional):
+  # celestia_app_archival_rpc: "http://app-archive:26657"
+  # celestia_node_archival_rpc: "http://da-archive:26658"
+  # pruning_window: 100000
 
 tokens:
   - token: "1836edb755cdff631a3463cee9b7b12268ded282"

@@ -117,6 +117,54 @@ metrics:
   enabled: true
 ```
 
+### Multiple Backend Endpoints
+
+Every backend field accepts either a single URL or a list of URLs. When multiple URLs are provided, DA-Proxy load-balances across them using round-robin selection. Health checks run independently against every endpoint.
+
+```yaml
+backends:
+  # Two consensus RPC nodes (round-robin)
+  celestia_app_rpc:
+    - "http://app-node-1:26657"
+    - "http://app-node-2:26657"
+
+  # Two gRPC endpoints
+  celestia_app_grpc:
+    - "app-node-1:9090"
+    - "app-node-2:9090"
+
+  # Two REST endpoints
+  celestia_app_rest:
+    - "http://app-node-1:1317"
+    - "http://app-node-2:1317"
+
+  # Two DA nodes
+  celestia_node_rpc:
+    - "http://da-node-1:26658"
+    - "http://da-node-2:26658"
+
+  # Two archival nodes for historical queries
+  celestia_app_archival_rpc:
+    - "http://app-archive-1:26657"
+    - "http://app-archive-2:26657"
+  celestia_node_archival_rpc:
+    - "http://da-archive-1:26658"
+    - "http://da-archive-2:26658"
+
+  # Requests for heights older than (head - pruning_window) go to archival nodes.
+  pruning_window: 100000
+
+  health_check_interval: 30s
+```
+
+A single URL still works (no list needed):
+
+```yaml
+backends:
+  celestia_app_rpc: "http://127.0.0.1:26657"
+  celestia_node_rpc: "http://127.0.0.1:26658"
+```
+
 Generate a bcrypt password hash:
 
 ```bash

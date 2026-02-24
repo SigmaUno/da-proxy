@@ -72,14 +72,51 @@ func (s ServerConfig) MaxBodySizeBytes() (int64, error) {
 	return parseSize(s.MaxBodySize)
 }
 
-// BackendsConfig holds backend endpoint URLs.
+// Endpoints is a list of backend URLs that can be specified in YAML as either
+// a single string or a list of strings.
+//
+//	# single endpoint
+//	celestia_app_rpc: "http://127.0.0.1:26657"
+//
+//	# multiple endpoints
+//	celestia_app_rpc:
+//	  - "http://app-1:26657"
+//	  - "http://app-2:26657"
+type Endpoints []string
+
+// UnmarshalYAML supports both scalar and sequence YAML values.
+func (e *Endpoints) UnmarshalYAML(unmarshal func(interface{}) error) error {
+	var single string
+	if err := unmarshal(&single); err == nil {
+		*e = Endpoints{single}
+		return nil
+	}
+	var list []string
+	if err := unmarshal(&list); err != nil {
+		return err
+	}
+	*e = list
+	return nil
+}
+
+// First returns the first endpoint or empty string.
+func (e Endpoints) First() string {
+	if len(e) == 0 {
+		return ""
+	}
+	return e[0]
+}
+
+// BackendsConfig holds backend endpoint URLs. Each backend field accepts one
+// or more URLs. When multiple URLs are provided, DA-Proxy load-balances
+// across them using round-robin selection.
 type BackendsConfig struct {
-	CelestiaAppRPC          string        `yaml:"celestia_app_rpc"`
-	CelestiaAppGRPC         string        `yaml:"celestia_app_grpc"`
-	CelestiaAppREST         string        `yaml:"celestia_app_rest"`
-	CelestiaNodeRPC         string        `yaml:"celestia_node_rpc"`
-	CelestiaNodeArchivalRPC string        `yaml:"celestia_node_archival_rpc"`
-	CelestiaAppArchivalRPC  string        `yaml:"celestia_app_archival_rpc"`
+	CelestiaAppRPC          Endpoints     `yaml:"celestia_app_rpc"`
+	CelestiaAppGRPC         Endpoints     `yaml:"celestia_app_grpc"`
+	CelestiaAppREST         Endpoints     `yaml:"celestia_app_rest"`
+	CelestiaNodeRPC         Endpoints     `yaml:"celestia_node_rpc"`
+	CelestiaNodeArchivalRPC Endpoints     `yaml:"celestia_node_archival_rpc"`
+	CelestiaAppArchivalRPC  Endpoints     `yaml:"celestia_app_archival_rpc"`
 	PruningWindow           int64         `yaml:"pruning_window"`
 	HealthCheckInterval     time.Duration `yaml:"health_check_interval"`
 }
@@ -164,11 +201,11 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("server.listen is required")
 	}
 
-	if c.Backends.CelestiaAppRPC == "" {
+	if len(c.Backends.CelestiaAppRPC) == 0 {
 		return fmt.Errorf("backends.celestia_app_rpc is required")
 	}
 
-	if c.Backends.CelestiaNodeRPC == "" {
+	if len(c.Backends.CelestiaNodeRPC) == 0 {
 		return fmt.Errorf("backends.celestia_node_rpc is required")
 	}
 
@@ -203,17 +240,17 @@ func applyDefaults(c *Config) {
 		c.Server.MaxBodySize = "10MB"
 	}
 
-	if c.Backends.CelestiaAppRPC == "" {
-		c.Backends.CelestiaAppRPC = "http://127.0.0.1:26657"
+	if len(c.Backends.CelestiaAppRPC) == 0 {
+		c.Backends.CelestiaAppRPC = Endpoints{"http://127.0.0.1:26657"}
 	}
-	if c.Backends.CelestiaAppGRPC == "" {
-		c.Backends.CelestiaAppGRPC = "127.0.0.1:9090"
+	if len(c.Backends.CelestiaAppGRPC) == 0 {
+		c.Backends.CelestiaAppGRPC = Endpoints{"127.0.0.1:9090"}
 	}
-	if c.Backends.CelestiaAppREST == "" {
-		c.Backends.CelestiaAppREST = "http://127.0.0.1:1317"
+	if len(c.Backends.CelestiaAppREST) == 0 {
+		c.Backends.CelestiaAppREST = Endpoints{"http://127.0.0.1:1317"}
 	}
-	if c.Backends.CelestiaNodeRPC == "" {
-		c.Backends.CelestiaNodeRPC = "http://127.0.0.1:26658"
+	if len(c.Backends.CelestiaNodeRPC) == 0 {
+		c.Backends.CelestiaNodeRPC = Endpoints{"http://127.0.0.1:26658"}
 	}
 	if c.Backends.HealthCheckInterval == 0 {
 		c.Backends.HealthCheckInterval = 30 * time.Second

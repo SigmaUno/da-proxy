@@ -19,10 +19,10 @@ import (
 
 func TestIntegration_HealthChecker_AllBackends(t *testing.T) {
 	backends := config.BackendsConfig{
-		CelestiaAppRPC:      prunedRPC,
-		CelestiaAppGRPC:     prunedGRPC,
-		CelestiaAppREST:     "http://195.154.212.53:1317",
-		CelestiaNodeRPC:     archivalDA,
+		CelestiaAppRPC:      config.Endpoints{prunedRPC},
+		CelestiaAppGRPC:     config.Endpoints{prunedGRPC},
+		CelestiaAppREST:     config.Endpoints{"http://195.154.212.53:1317"},
+		CelestiaNodeRPC:     config.Endpoints{archivalDA},
 		HealthCheckInterval: 5 * time.Second,
 	}
 
@@ -65,10 +65,10 @@ func TestIntegration_HealthChecker_AllBackends(t *testing.T) {
 
 func TestIntegration_HealthChecker_MetricsUpdated(t *testing.T) {
 	backends := config.BackendsConfig{
-		CelestiaAppRPC:      prunedRPC,
-		CelestiaAppGRPC:     prunedGRPC,
-		CelestiaAppREST:     "http://195.154.212.53:1317",
-		CelestiaNodeRPC:     archivalDA,
+		CelestiaAppRPC:      config.Endpoints{prunedRPC},
+		CelestiaAppGRPC:     config.Endpoints{prunedGRPC},
+		CelestiaAppREST:     config.Endpoints{"http://195.154.212.53:1317"},
+		CelestiaNodeRPC:     config.Endpoints{archivalDA},
 		HealthCheckInterval: 5 * time.Second,
 	}
 
@@ -115,10 +115,10 @@ func TestIntegration_HealthChecker_MetricsUpdated(t *testing.T) {
 
 func TestIntegration_HealthChecker_ArchivalNode(t *testing.T) {
 	backends := config.BackendsConfig{
-		CelestiaAppRPC:      archivalRPC,
-		CelestiaAppGRPC:     "195.154.103.60:9090",
-		CelestiaAppREST:     "http://195.154.103.60:1317",
-		CelestiaNodeRPC:     archivalDA,
+		CelestiaAppRPC:      config.Endpoints{archivalRPC},
+		CelestiaAppGRPC:     config.Endpoints{"195.154.103.60:9090"},
+		CelestiaAppREST:     config.Endpoints{"http://195.154.103.60:1317"},
+		CelestiaNodeRPC:     config.Endpoints{archivalDA},
 		HealthCheckInterval: 5 * time.Second,
 	}
 

@@ -91,10 +91,10 @@ func TestLoad_FullConfig(t *testing.T) {
 	assert.Equal(t, ":9292", cfg.Metrics.Listen)
 	assert.False(t, cfg.Metrics.IsEnabled())
 
-	assert.Equal(t, "http://10.0.0.1:26657", cfg.Backends.CelestiaAppRPC)
-	assert.Equal(t, "10.0.0.1:9090", cfg.Backends.CelestiaAppGRPC)
-	assert.Equal(t, "http://10.0.0.1:1317", cfg.Backends.CelestiaAppREST)
-	assert.Equal(t, "http://10.0.0.1:26658", cfg.Backends.CelestiaNodeRPC)
+	assert.Equal(t, Endpoints{"http://10.0.0.1:26657"}, cfg.Backends.CelestiaAppRPC)
+	assert.Equal(t, Endpoints{"10.0.0.1:9090"}, cfg.Backends.CelestiaAppGRPC)
+	assert.Equal(t, Endpoints{"http://10.0.0.1:1317"}, cfg.Backends.CelestiaAppREST)
+	assert.Equal(t, Endpoints{"http://10.0.0.1:26658"}, cfg.Backends.CelestiaNodeRPC)
 	assert.Equal(t, 10*time.Second, cfg.Backends.HealthCheckInterval)
 
 	require.Len(t, cfg.Tokens, 2)
@@ -131,10 +131,10 @@ func TestLoad_MinimalConfigAppliesDefaults(t *testing.T) {
 	assert.Equal(t, ":9191", cfg.Metrics.Listen)
 	assert.True(t, cfg.Metrics.IsEnabled())
 
-	assert.Equal(t, "http://127.0.0.1:26657", cfg.Backends.CelestiaAppRPC)
-	assert.Equal(t, "127.0.0.1:9090", cfg.Backends.CelestiaAppGRPC)
-	assert.Equal(t, "http://127.0.0.1:1317", cfg.Backends.CelestiaAppREST)
-	assert.Equal(t, "http://127.0.0.1:26658", cfg.Backends.CelestiaNodeRPC)
+	assert.Equal(t, Endpoints{"http://127.0.0.1:26657"}, cfg.Backends.CelestiaAppRPC)
+	assert.Equal(t, Endpoints{"127.0.0.1:9090"}, cfg.Backends.CelestiaAppGRPC)
+	assert.Equal(t, Endpoints{"http://127.0.0.1:1317"}, cfg.Backends.CelestiaAppREST)
+	assert.Equal(t, Endpoints{"http://127.0.0.1:26658"}, cfg.Backends.CelestiaNodeRPC)
 	assert.Equal(t, 30*time.Second, cfg.Backends.HealthCheckInterval)
 
 	assert.Equal(t, ":8080", cfg.Admin.Listen)

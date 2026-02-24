@@ -10,10 +10,10 @@ import (
 
 func defaultBackends() config.BackendsConfig {
 	return config.BackendsConfig{
-		CelestiaAppRPC:  "http://localhost:26657",
-		CelestiaAppGRPC: "localhost:9090",
-		CelestiaAppREST: "http://localhost:1317",
-		CelestiaNodeRPC: "http://localhost:26658",
+		CelestiaAppRPC:  config.Endpoints{"http://localhost:26657"},
+		CelestiaAppGRPC: config.Endpoints{"localhost:9090"},
+		CelestiaAppREST: config.Endpoints{"http://localhost:1317"},
+		CelestiaNodeRPC: config.Endpoints{"http://localhost:26658"},
 	}
 }
 
@@ -400,12 +400,12 @@ func TestTargetURL(t *testing.T) {
 
 func TestRouter_HeightAwareRouting(t *testing.T) {
 	backends := config.BackendsConfig{
-		CelestiaAppRPC:          "http://localhost:26657",
-		CelestiaAppGRPC:         "localhost:9090",
-		CelestiaAppREST:         "http://localhost:1317",
-		CelestiaNodeRPC:         "http://localhost:26658",
-		CelestiaNodeArchivalRPC: "http://localhost:36658",
-		CelestiaAppArchivalRPC:  "http://localhost:36657",
+		CelestiaAppRPC:          config.Endpoints{"http://localhost:26657"},
+		CelestiaAppGRPC:         config.Endpoints{"localhost:9090"},
+		CelestiaAppREST:         config.Endpoints{"http://localhost:1317"},
+		CelestiaNodeRPC:         config.Endpoints{"http://localhost:26658"},
+		CelestiaNodeArchivalRPC: config.Endpoints{"http://localhost:36658"},
+		CelestiaAppArchivalRPC:  config.Endpoints{"http://localhost:36657"},
 		PruningWindow:           1000,
 	}
 
@@ -471,12 +471,12 @@ func TestTargetURL_ArchivalFallback(t *testing.T) {
 
 func TestTargetURL_WithArchival(t *testing.T) {
 	backends := config.BackendsConfig{
-		CelestiaAppRPC:          "http://localhost:26657",
-		CelestiaAppGRPC:         "localhost:9090",
-		CelestiaAppREST:         "http://localhost:1317",
-		CelestiaNodeRPC:         "http://localhost:26658",
-		CelestiaNodeArchivalRPC: "http://archival:36658",
-		CelestiaAppArchivalRPC:  "http://archival:36657",
+		CelestiaAppRPC:          config.Endpoints{"http://localhost:26657"},
+		CelestiaAppGRPC:         config.Endpoints{"localhost:9090"},
+		CelestiaAppREST:         config.Endpoints{"http://localhost:1317"},
+		CelestiaNodeRPC:         config.Endpoints{"http://localhost:26658"},
+		CelestiaNodeArchivalRPC: config.Endpoints{"http://archival:36658"},
+		CelestiaAppArchivalRPC:  config.Endpoints{"http://archival:36657"},
 	}
 	r := NewRouter(backends)
 

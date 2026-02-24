@@ -48,6 +48,7 @@ type Router interface {
 
 type router struct {
 	backends      config.BackendsConfig
+	balancers     map[Backend]*Balancer
 	heightTracker *HeightTracker
 }
 
@@ -55,35 +56,46 @@ type router struct {
 func NewRouter(backends config.BackendsConfig) Router {
 	return &router{
 		backends:      backends,
+		balancers:     buildBalancers(backends),
 		heightTracker: NewHeightTracker(backends.PruningWindow),
 	}
 }
 
 // NewRouterWithTracker creates a Router with an explicit HeightTracker.
 func NewRouterWithTracker(backends config.BackendsConfig, ht *HeightTracker) Router {
-	return &router{backends: backends, heightTracker: ht}
+	return &router{
+		backends:      backends,
+		balancers:     buildBalancers(backends),
+		heightTracker: ht,
+	}
+}
+
+func buildBalancers(b config.BackendsConfig) map[Backend]*Balancer {
+	m := make(map[Backend]*Balancer, 6)
+	m[BackendCelestiaAppRPC] = NewBalancer(b.CelestiaAppRPC)
+	m[BackendCelestiaAppGRPC] = NewBalancer(b.CelestiaAppGRPC)
+	m[BackendCelestiaAppREST] = NewBalancer(b.CelestiaAppREST)
+	m[BackendCelestiaNodeRPC] = NewBalancer(b.CelestiaNodeRPC)
+	m[BackendCelestiaNodeArchivalRPC] = NewBalancer(b.CelestiaNodeArchivalRPC)
+	m[BackendCelestiaAppArchivalRPC] = NewBalancer(b.CelestiaAppArchivalRPC)
+	return m
+}
+
+// Balancers returns the backend balancers map for health checking.
+func (r *router) Balancers() map[Backend]*Balancer {
+	return r.balancers
 }
 
 func (r *router) TargetURL(backend Backend) string {
+	if bal, ok := r.balancers[backend]; ok && bal.Len() > 0 {
+		return bal.Next()
+	}
+	// Archival backends fall back to pruned when not configured.
 	switch backend {
-	case BackendCelestiaAppRPC:
-		return r.backends.CelestiaAppRPC
-	case BackendCelestiaAppGRPC:
-		return r.backends.CelestiaAppGRPC
-	case BackendCelestiaAppREST:
-		return r.backends.CelestiaAppREST
-	case BackendCelestiaNodeRPC:
-		return r.backends.CelestiaNodeRPC
 	case BackendCelestiaNodeArchivalRPC:
-		if r.backends.CelestiaNodeArchivalRPC != "" {
-			return r.backends.CelestiaNodeArchivalRPC
-		}
-		return r.backends.CelestiaNodeRPC // fallback to pruned
+		return r.TargetURL(BackendCelestiaNodeRPC)
 	case BackendCelestiaAppArchivalRPC:
-		if r.backends.CelestiaAppArchivalRPC != "" {
-			return r.backends.CelestiaAppArchivalRPC
-		}
-		return r.backends.CelestiaAppRPC // fallback to pruned
+		return r.TargetURL(BackendCelestiaAppRPC)
 	default:
 		return ""
 	}
@@ -94,7 +106,7 @@ func (r *router) Route(contentType string, path string, body []byte) (RouteDecis
 	if strings.HasPrefix(contentType, "application/grpc") {
 		return RouteDecision{
 			Backend:   BackendCelestiaAppGRPC,
-			TargetURL: r.backends.CelestiaAppGRPC,
+			TargetURL: r.TargetURL(BackendCelestiaAppGRPC),
 		}, nil
 	}
 
@@ -102,7 +114,7 @@ func (r *router) Route(contentType string, path string, body []byte) (RouteDecis
 	if isRESTPath(path) {
 		return RouteDecision{
 			Backend:   BackendCelestiaAppREST,
-			TargetURL: r.backends.CelestiaAppREST,
+			TargetURL: r.TargetURL(BackendCelestiaAppREST),
 		}, nil
 	}
 
@@ -110,7 +122,7 @@ func (r *router) Route(contentType string, path string, body []byte) (RouteDecis
 	if len(body) == 0 {
 		return RouteDecision{
 			Backend:   BackendCelestiaAppRPC,
-			TargetURL: r.backends.CelestiaAppRPC,
+			TargetURL: r.TargetURL(BackendCelestiaAppRPC),
 		}, nil
 	}
 

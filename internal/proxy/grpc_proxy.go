@@ -7,43 +7,44 @@ import (
 	"net/url"
 
 	"go.uber.org/zap"
+
+	"github.com/SigmaUno/da-proxy/internal/config"
 )
 
 // GRPCProxy handles transparent gRPC reverse proxying.
 // In Phase 1 this uses HTTP/1.1 transport for simplicity.
 // Full HTTP/2 gRPC passthrough is planned for Phase 2.
 type GRPCProxy struct {
-	targetAddr string
-	logger     *zap.Logger
-	proxy      *httputil.ReverseProxy
+	balancer *Balancer
+	logger   *zap.Logger
+	proxy    *httputil.ReverseProxy
 }
 
-// NewGRPCProxy creates a new gRPC reverse proxy targeting the given address.
-func NewGRPCProxy(targetAddr string, logger *zap.Logger) *GRPCProxy {
-	target := &url.URL{
-		Scheme: "http",
-		Host:   targetAddr,
-	}
+// NewGRPCProxy creates a new gRPC reverse proxy targeting the given addresses.
+func NewGRPCProxy(targets config.Endpoints, logger *zap.Logger) *GRPCProxy {
+	bal := NewBalancer(targets)
 
 	proxy := &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
+			addr := bal.Next()
+			target := &url.URL{
+				Scheme: "http",
+				Host:   addr,
+			}
 			req.URL.Scheme = target.Scheme
 			req.URL.Host = target.Host
 			req.Host = target.Host
 		},
 		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, err error) {
-			logger.Error("gRPC proxy error",
-				zap.String("target", targetAddr),
-				zap.Error(err),
-			)
+			logger.Error("gRPC proxy error", zap.Error(err))
 			w.WriteHeader(http.StatusBadGateway)
 		},
 	}
 
 	return &GRPCProxy{
-		targetAddr: targetAddr,
-		logger:     logger,
-		proxy:      proxy,
+		balancer: bal,
+		logger:   logger,
+		proxy:    proxy,
 	}
 }
 

@@ -89,34 +89,59 @@ func (h *healthChecker) Status() map[string]HealthStatus {
 	return result
 }
 
+func (h *healthChecker) endpointName(base string, idx, total int) string {
+	if total <= 1 {
+		return base
+	}
+	return fmt.Sprintf("%s/%d", base, idx)
+}
+
 func (h *healthChecker) checkAll() {
-	checks := []struct {
+	type healthCheck struct {
 		name string
 		fn   func() HealthStatus
-	}{
-		{"celestia-app-rpc", func() HealthStatus { return h.checkHTTP(h.backends.CelestiaAppRPC, "/health") }},
-		{"celestia-app-rest", func() HealthStatus {
-			return h.checkHTTP(h.backends.CelestiaAppREST, "/cosmos/base/tendermint/v1beta1/syncing")
-		}},
-		{"celestia-node-rpc", func() HealthStatus { return h.checkJSONRPC(h.backends.CelestiaNodeRPC) }},
 	}
 
-	// Add archival backends if configured.
-	if h.backends.CelestiaNodeArchivalRPC != "" {
-		checks = append(checks, struct {
-			name string
-			fn   func() HealthStatus
-		}{"celestia-node-archival-rpc", func() HealthStatus {
-			return h.checkJSONRPC(h.backends.CelestiaNodeArchivalRPC)
-		}})
+	var checks []healthCheck
+
+	for i, ep := range h.backends.CelestiaAppRPC {
+		endpoint := ep
+		checks = append(checks, healthCheck{
+			h.endpointName("celestia-app-rpc", i, len(h.backends.CelestiaAppRPC)),
+			func() HealthStatus { return h.checkHTTP(endpoint, "/health") },
+		})
 	}
-	if h.backends.CelestiaAppArchivalRPC != "" {
-		checks = append(checks, struct {
-			name string
-			fn   func() HealthStatus
-		}{"celestia-app-archival-rpc", func() HealthStatus {
-			return h.checkHTTP(h.backends.CelestiaAppArchivalRPC, "/health")
-		}})
+	for i, ep := range h.backends.CelestiaAppREST {
+		endpoint := ep
+		checks = append(checks, healthCheck{
+			h.endpointName("celestia-app-rest", i, len(h.backends.CelestiaAppREST)),
+			func() HealthStatus {
+				return h.checkHTTP(endpoint, "/cosmos/base/tendermint/v1beta1/syncing")
+			},
+		})
+	}
+	for i, ep := range h.backends.CelestiaNodeRPC {
+		endpoint := ep
+		checks = append(checks, healthCheck{
+			h.endpointName("celestia-node-rpc", i, len(h.backends.CelestiaNodeRPC)),
+			func() HealthStatus { return h.checkJSONRPC(endpoint) },
+		})
+	}
+
+	// Archival backends.
+	for i, ep := range h.backends.CelestiaNodeArchivalRPC {
+		endpoint := ep
+		checks = append(checks, healthCheck{
+			h.endpointName("celestia-node-archival-rpc", i, len(h.backends.CelestiaNodeArchivalRPC)),
+			func() HealthStatus { return h.checkJSONRPC(endpoint) },
+		})
+	}
+	for i, ep := range h.backends.CelestiaAppArchivalRPC {
+		endpoint := ep
+		checks = append(checks, healthCheck{
+			h.endpointName("celestia-app-archival-rpc", i, len(h.backends.CelestiaAppArchivalRPC)),
+			func() HealthStatus { return h.checkHTTP(endpoint, "/health") },
+		})
 	}
 
 	for _, check := range checks {
@@ -159,7 +184,7 @@ func (h *healthChecker) checkAll() {
 
 func (h *healthChecker) pollHeadHeight() {
 	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"status","params":[]}`)
-	resp, err := h.client.Post(h.backends.CelestiaAppRPC, "application/json", bytes.NewReader(body))
+	resp, err := h.client.Post(h.backends.CelestiaAppRPC.First(), "application/json", bytes.NewReader(body))
 	if err != nil {
 		h.logger.Debug("failed to poll head height", zap.Error(err))
 		return

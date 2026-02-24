@@ -30,10 +30,10 @@ const (
 func newTestHandler(t *testing.T) *proxy.Handler {
 	t.Helper()
 	backends := config.BackendsConfig{
-		CelestiaAppRPC:  prunedRPC,
-		CelestiaAppGRPC: prunedGRPC,
-		CelestiaAppREST: "http://195.154.212.53:1317",
-		CelestiaNodeRPC: archivalDA,
+		CelestiaAppRPC:  config.Endpoints{prunedRPC},
+		CelestiaAppGRPC: config.Endpoints{prunedGRPC},
+		CelestiaAppREST: config.Endpoints{"http://195.154.212.53:1317"},
+		CelestiaNodeRPC: config.Endpoints{archivalDA},
 	}
 	router := proxy.NewRouter(backends)
 	logger, _ := zap.NewDevelopment()
@@ -263,10 +263,10 @@ func TestIntegration_ArchivalRPC_EarlyBlock(t *testing.T) {
 	// Archival has blocks from ~286000, pruned only from ~10217301.
 	// Block 500000 exists on archival but not on pruned.
 	backends := config.BackendsConfig{
-		CelestiaAppRPC:  archivalRPC,
-		CelestiaAppGRPC: prunedGRPC,
-		CelestiaAppREST: "http://195.154.103.60:1317",
-		CelestiaNodeRPC: archivalDA,
+		CelestiaAppRPC:  config.Endpoints{archivalRPC},
+		CelestiaAppGRPC: config.Endpoints{prunedGRPC},
+		CelestiaAppREST: config.Endpoints{"http://195.154.103.60:1317"},
+		CelestiaNodeRPC: config.Endpoints{archivalDA},
 	}
 	router := proxy.NewRouter(backends)
 	logger, _ := zap.NewDevelopment()
@@ -337,7 +337,7 @@ func TestIntegration_MalformedJSON(t *testing.T) {
 func TestIntegration_GRPC_Connection(t *testing.T) {
 	// Verify the gRPC proxy can at least establish a connection.
 	logger, _ := zap.NewDevelopment()
-	grpcProxy := proxy.NewGRPCProxy(prunedGRPC, logger)
+	grpcProxy := proxy.NewGRPCProxy(config.Endpoints{prunedGRPC}, logger)
 
 	// Send a minimal HTTP request with gRPC content-type.
 	req := httptest.NewRequest(http.MethodPost, "/cosmos.base.tendermint.v1beta1.Service/GetLatestBlock", nil)

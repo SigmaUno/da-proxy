@@ -34,10 +34,10 @@ func setupE2EServer(t *testing.T) *httptest.Server {
 	t.Helper()
 
 	backends := config.BackendsConfig{
-		CelestiaAppRPC:  prunedRPC,
-		CelestiaAppGRPC: prunedGRPC,
-		CelestiaAppREST: "http://195.154.212.53:1317",
-		CelestiaNodeRPC: archivalDA,
+		CelestiaAppRPC:  config.Endpoints{prunedRPC},
+		CelestiaAppGRPC: config.Endpoints{prunedGRPC},
+		CelestiaAppREST: config.Endpoints{"http://195.154.212.53:1317"},
+		CelestiaNodeRPC: config.Endpoints{archivalDA},
 	}
 
 	tokens := []config.TokenConfig{

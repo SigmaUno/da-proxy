@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/zap"
+
+	"github.com/SigmaUno/da-proxy/internal/config"
 )
 
 func TestGRPCProxy_ForwardsToTarget(t *testing.T) {
@@ -19,7 +21,7 @@ func TestGRPCProxy_ForwardsToTarget(t *testing.T) {
 	}))
 	defer backend.Close()
 
-	proxy := NewGRPCProxy(backend.Listener.Addr().String(), zap.NewNop())
+	proxy := NewGRPCProxy(config.Endpoints{backend.Listener.Addr().String()}, zap.NewNop())
 	handler := proxy.Handler()
 
 	req := httptest.NewRequest(http.MethodPost, "/cosmos.bank.v1beta1.Query/AllBalances", nil)
@@ -34,7 +36,7 @@ func TestGRPCProxy_ForwardsToTarget(t *testing.T) {
 }
 
 func TestGRPCProxy_BackendDown(t *testing.T) {
-	proxy := NewGRPCProxy("127.0.0.1:1", zap.NewNop())
+	proxy := NewGRPCProxy(config.Endpoints{"127.0.0.1:1"}, zap.NewNop())
 	handler := proxy.Handler()
 
 	req := httptest.NewRequest(http.MethodPost, "/test.Service/Method", nil)
@@ -47,8 +49,7 @@ func TestGRPCProxy_BackendDown(t *testing.T) {
 }
 
 func TestNewGRPCProxy(t *testing.T) {
-	proxy := NewGRPCProxy("localhost:9090", zap.NewNop())
+	proxy := NewGRPCProxy(config.Endpoints{"localhost:9090"}, zap.NewNop())
 	assert.NotNil(t, proxy)
 	assert.NotNil(t, proxy.Handler())
-	assert.Equal(t, "localhost:9090", proxy.targetAddr)
 }
