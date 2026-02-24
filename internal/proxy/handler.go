@@ -143,6 +143,13 @@ func (h *Handler) HandleRequest(c echo.Context) error {
 	canRetry := height > 0 && (len(endpoints) > 1 || hasArchival)
 
 	if canRetry {
+		h.logger.Debug("using retry path",
+			zap.String("backend", string(decision.Backend)),
+			zap.Int64("height", height),
+			zap.Int("pool_endpoints", len(endpoints)),
+			zap.Bool("has_archival", hasArchival),
+			zap.String("target", decision.TargetURL),
+		)
 		return h.proxyWithRetry(c, req, decision, targetURL, path, rawQuery, body, height, shouldCache)
 	}
 
@@ -198,6 +205,11 @@ func (h *Handler) proxyWithRetry(c echo.Context, req *http.Request, decision Rou
 	// Try archival backend if configured.
 	if h.router.HasArchivalBackend(decision.Backend) {
 		archivalBackend := h.router.ArchivalBackendFor(decision.Backend)
+		h.logger.Info("trying archival backend",
+			zap.String("archival_backend", string(archivalBackend)),
+			zap.Int("archival_endpoints", len(h.router.AllEndpoints(archivalBackend))),
+			zap.Int64("height", height),
+		)
 		for _, ep := range h.router.AllEndpoints(archivalBackend) {
 			archivalTarget, err := url.Parse(ep)
 			if err != nil {
@@ -361,10 +373,10 @@ func (w *bufferedResponseWriter) WriteHeader(code int) {
 }
 
 // isPrunedError returns true when the response indicates the block was pruned
-// or not available on the node. Tendermint returns HTTP 200 with a JSON error
-// body for these cases.
+// or not available on the node. Tendermint may return HTTP 200 or HTTP 500
+// with a JSON-RPC error body for these cases.
 func isPrunedError(statusCode int, body []byte) bool {
-	if statusCode != http.StatusOK {
+	if statusCode != http.StatusOK && statusCode != http.StatusInternalServerError {
 		return false
 	}
 	if len(body) == 0 {

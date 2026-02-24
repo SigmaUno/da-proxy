@@ -543,7 +543,13 @@ func TestIsPrunedError(t *testing.T) {
 			false,
 		},
 		{
-			"non-200 status",
+			"500 with pruned error",
+			500,
+			`{"jsonrpc":"2.0","id":-1,"error":{"code":-32603,"message":"Internal error","data":"height 400000 is not available, lowest height is 10222558"}}`,
+			true,
+		},
+		{
+			"non-200/500 status",
 			502,
 			`{"error":"backend unavailable"}`,
 			false,
@@ -590,10 +596,10 @@ func TestHandler_QueryStringForwarded(t *testing.T) {
 }
 
 func TestHandler_FallbackToArchival(t *testing.T) {
-	// Set up two backends: pruned returns block-not-found, archival returns success.
+	// Set up two backends: pruned returns block-not-found (HTTP 500), archival returns success.
 	pruned := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","error":{"code":-32603,"message":"Internal error","data":"height 286001 is not available, lowest height is 1500000"},"id":1}`))
 	}))
 	t.Cleanup(pruned.Close)
@@ -675,7 +681,7 @@ func TestHandler_NoFallbackWithoutArchivalConfig(t *testing.T) {
 	// Without archival backend configured and only one endpoint, pruned error should pass through.
 	pruned := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","error":{"code":-32603,"message":"Internal error","data":"height 286001 is not available, lowest height is 1500000"},"id":1}`))
 	}))
 	t.Cleanup(pruned.Close)
@@ -696,16 +702,17 @@ func TestHandler_NoFallbackWithoutArchivalConfig(t *testing.T) {
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
-	assert.Equal(t, http.StatusOK, rec.Code)
+	// Backend returns 500 with pruned error; no fallback available so it passes through.
+	assert.Equal(t, http.StatusInternalServerError, rec.Code)
 	respBody, _ := io.ReadAll(rec.Body)
 	assert.Contains(t, string(respBody), "is not available")
 }
 
 func TestHandler_RetryOtherEndpointInPool(t *testing.T) {
-	// First endpoint doesn't have the block, second endpoint does.
+	// First endpoint doesn't have the block (returns HTTP 500), second endpoint does.
 	prunedNode := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(http.StatusInternalServerError)
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","error":{"code":-32603,"message":"Internal error","data":"height 286001 is not available, lowest height is 1500000"},"id":1}`))
 	}))
 	t.Cleanup(prunedNode.Close)
