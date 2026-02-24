@@ -39,6 +39,7 @@ CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON request_logs(timestamp);
 CREATE INDEX IF NOT EXISTS idx_logs_method ON request_logs(method);
 CREATE INDEX IF NOT EXISTS idx_logs_token_name ON request_logs(token_name);
 CREATE INDEX IF NOT EXISTS idx_logs_status ON request_logs(status_code);
+CREATE INDEX IF NOT EXISTS idx_logs_backend ON request_logs(backend);
 `
 
 // NewPostgresStore creates a new PostgreSQL-backed log store.
@@ -267,6 +268,33 @@ func pgBuildQuery(base string, filter LogFilter) (string, []interface{}) {
 	}
 
 	return query, args
+}
+
+func (s *postgresStore) BackendStats(since time.Time) ([]BackendStat, error) {
+	const query = `SELECT backend, AVG(latency_ms), COUNT(*),
+		ARRAY_TO_STRING(ARRAY_AGG(DISTINCT method), ',')
+		FROM request_logs WHERE timestamp >= $1
+		GROUP BY backend`
+
+	rows, err := s.db.Query(query, since)
+	if err != nil {
+		return nil, fmt.Errorf("querying backend stats: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var stats []BackendStat
+	for rows.Next() {
+		var bs BackendStat
+		var methods sql.NullString
+		if err := rows.Scan(&bs.Backend, &bs.AvgLatencyMs, &bs.TotalRequests, &methods); err != nil {
+			return nil, fmt.Errorf("scanning backend stat: %w", err)
+		}
+		if methods.Valid && methods.String != "" {
+			bs.Methods = strings.Split(methods.String, ",")
+		}
+		stats = append(stats, bs)
+	}
+	return stats, rows.Err()
 }
 
 func (s *postgresStore) Close() error {

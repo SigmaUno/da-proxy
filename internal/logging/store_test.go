@@ -124,3 +124,66 @@ func TestSQLiteStore_ErrorField(t *testing.T) {
 	require.Len(t, entries, 1)
 	assert.Equal(t, "something went wrong", entries[0].Error)
 }
+
+func TestSQLiteStore_BackendStats(t *testing.T) {
+	store := newTestStore(t)
+
+	entries := []LogEntry{
+		{Timestamp: time.Now(), RequestID: "r1", TokenName: "t", Method: "blob.Get",
+			Backend: "celestia-node-rpc", StatusCode: 200, LatencyMs: 40, ClientIP: "1.1.1.1"},
+		{Timestamp: time.Now(), RequestID: "r2", TokenName: "t", Method: "blob.Submit",
+			Backend: "celestia-node-rpc", StatusCode: 200, LatencyMs: 60, ClientIP: "1.1.1.1"},
+		{Timestamp: time.Now(), RequestID: "r3", TokenName: "t", Method: "status",
+			Backend: "celestia-app-rpc", StatusCode: 200, LatencyMs: 20, ClientIP: "1.1.1.1"},
+	}
+	for _, e := range entries {
+		store.Push(e)
+	}
+
+	// Wait for batch flush.
+	time.Sleep(2 * time.Second)
+
+	stats, err := store.BackendStats(time.Now().Add(-time.Hour))
+	require.NoError(t, err)
+	require.Len(t, stats, 2)
+
+	// Build a map for easier assertions.
+	m := make(map[string]BackendStat)
+	for _, s := range stats {
+		m[s.Backend] = s
+	}
+
+	// celestia-node-rpc: avg = 50, count = 2, methods = [blob.Get, blob.Submit]
+	nodeStats := m["celestia-node-rpc"]
+	assert.InDelta(t, 50.0, nodeStats.AvgLatencyMs, 0.1)
+	assert.Equal(t, int64(2), nodeStats.TotalRequests)
+	assert.ElementsMatch(t, []string{"blob.Get", "blob.Submit"}, nodeStats.Methods)
+
+	// celestia-app-rpc: avg = 20, count = 1, methods = [status]
+	appStats := m["celestia-app-rpc"]
+	assert.InDelta(t, 20.0, appStats.AvgLatencyMs, 0.1)
+	assert.Equal(t, int64(1), appStats.TotalRequests)
+	assert.Equal(t, []string{"status"}, appStats.Methods)
+}
+
+func TestSQLiteStore_BackendStats_TimeWindow(t *testing.T) {
+	store := newTestStore(t)
+
+	store.Push(LogEntry{
+		Timestamp: time.Now(), RequestID: "r1", TokenName: "t", Method: "status",
+		Backend: "celestia-app-rpc", StatusCode: 200, LatencyMs: 30, ClientIP: "1.1.1.1",
+	})
+
+	time.Sleep(2 * time.Second)
+
+	// Query with future since time should return nothing.
+	stats, err := store.BackendStats(time.Now().Add(time.Hour))
+	require.NoError(t, err)
+	assert.Empty(t, stats)
+
+	// Query with past since time should return the entry.
+	stats, err = store.BackendStats(time.Now().Add(-time.Hour))
+	require.NoError(t, err)
+	require.Len(t, stats, 1)
+	assert.Equal(t, "celestia-app-rpc", stats[0].Backend)
+}

@@ -11,6 +11,7 @@ func registerRoutes(e *echo.Echo, h *handlers) {
 	api.GET("/logs/stream", h.handleLogsStream)
 	api.GET("/logs/export", h.handleLogsExport)
 	api.GET("/metrics/summary", h.handleMetricsSummary)
+	api.GET("/backends", h.handleBackends)
 
 	// Token management.
 	api.GET("/tokens", h.handleListTokens)

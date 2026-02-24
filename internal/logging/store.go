@@ -25,11 +25,20 @@ type LogFilter struct {
 	SortDesc   bool
 }
 
+// BackendStat holds aggregate statistics for a single backend.
+type BackendStat struct {
+	Backend       string   `json:"backend"`
+	AvgLatencyMs  float64  `json:"avg_latency_ms"`
+	TotalRequests int64    `json:"total_requests"`
+	Methods       []string `json:"methods"`
+}
+
 // Store is the interface for persistent log storage.
 type Store interface {
 	Push(entry LogEntry)
 	Query(filter LogFilter) ([]LogEntry, error)
 	Count(filter LogFilter) (int64, error)
+	BackendStats(since time.Time) ([]BackendStat, error)
 	Close() error
 }
 
@@ -63,6 +72,7 @@ CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON request_logs(timestamp);
 CREATE INDEX IF NOT EXISTS idx_logs_method ON request_logs(method);
 CREATE INDEX IF NOT EXISTS idx_logs_token_name ON request_logs(token_name);
 CREATE INDEX IF NOT EXISTS idx_logs_status ON request_logs(status_code);
+CREATE INDEX IF NOT EXISTS idx_logs_backend ON request_logs(backend);
 `
 
 const insertSQL = `
@@ -287,6 +297,32 @@ func buildQuery(base string, filter LogFilter) (string, []interface{}) {
 	}
 
 	return query, args
+}
+
+func (s *sqliteStore) BackendStats(since time.Time) ([]BackendStat, error) {
+	const query = `SELECT backend, AVG(latency_ms), COUNT(*), GROUP_CONCAT(DISTINCT method)
+		FROM request_logs WHERE timestamp >= ?
+		GROUP BY backend`
+
+	rows, err := s.db.Query(query, since)
+	if err != nil {
+		return nil, fmt.Errorf("querying backend stats: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var stats []BackendStat
+	for rows.Next() {
+		var bs BackendStat
+		var methods sql.NullString
+		if err := rows.Scan(&bs.Backend, &bs.AvgLatencyMs, &bs.TotalRequests, &methods); err != nil {
+			return nil, fmt.Errorf("scanning backend stat: %w", err)
+		}
+		if methods.Valid && methods.String != "" {
+			bs.Methods = strings.Split(methods.String, ",")
+		}
+		stats = append(stats, bs)
+	}
+	return stats, rows.Err()
 }
 
 func (s *sqliteStore) Close() error {

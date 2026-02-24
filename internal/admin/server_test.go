@@ -24,7 +24,17 @@ func testPasswordHash(t *testing.T) string {
 	return string(hash)
 }
 
+type testServerResult struct {
+	server *Server
+	store  logging.Store
+}
+
 func setupTestServer(t *testing.T) *Server {
+	t.Helper()
+	return setupTestServerWithDeps(t).server
+}
+
+func setupTestServerWithDeps(t *testing.T) testServerResult {
 	t.Helper()
 
 	dbPath := filepath.Join(t.TempDir(), "test.db")
@@ -45,6 +55,12 @@ func setupTestServer(t *testing.T) *Server {
 		LogBuffer: ringBuf,
 		LogStore:  store,
 		Config: &config.Config{
+			Backends: config.BackendsConfig{
+				CelestiaAppRPC:  config.Endpoints{"http://127.0.0.1:26657"},
+				CelestiaAppGRPC: config.Endpoints{"127.0.0.1:9090"},
+				CelestiaAppREST: config.Endpoints{"http://127.0.0.1:1317"},
+				CelestiaNodeRPC: config.Endpoints{"http://127.0.0.1:26658"},
+			},
 			Tokens: []config.TokenConfig{
 				{Token: "abc", Name: "t1", Enabled: true},
 				{Token: "def", Name: "t2", Enabled: false},
@@ -55,7 +71,10 @@ func setupTestServer(t *testing.T) *Server {
 		Version:   "test-v1",
 	}
 
-	return NewServer(cfg, deps)
+	return testServerResult{
+		server: NewServer(cfg, deps),
+		store:  store,
+	}
 }
 
 func doAuthRequest(t *testing.T, s *Server, method, path string) *httptest.ResponseRecorder {
@@ -166,4 +185,88 @@ func TestAdmin_CORSHeaders(t *testing.T) {
 	s.echo.ServeHTTP(rec, req)
 
 	assert.Contains(t, rec.Header().Get("Access-Control-Allow-Origin"), "http://localhost:3000")
+}
+
+func TestAdmin_BackendsEndpoint(t *testing.T) {
+	s := setupTestServer(t)
+	rec := doAuthRequest(t, s, http.MethodGet, "/admin/api/backends")
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var body map[string]interface{}
+	err := json.Unmarshal(rec.Body.Bytes(), &body)
+	require.NoError(t, err)
+
+	backends, ok := body["backends"].([]interface{})
+	require.True(t, ok)
+	// 4 backends configured (archival not set so omitted)
+	assert.Len(t, backends, 4)
+
+	// Verify first backend structure.
+	first := backends[0].(map[string]interface{})
+	assert.Equal(t, "celestia-app-rpc", first["name"])
+	assert.NotNil(t, first["endpoints"])
+	assert.NotNil(t, first["methods"])
+}
+
+func TestAdmin_BackendsWithStats(t *testing.T) {
+	ts := setupTestServerWithDeps(t)
+	s := ts.server
+
+	// Push some log entries to build stats.
+	store := ts.store
+	entries := []logging.LogEntry{
+		{Timestamp: time.Now(), RequestID: "r1", TokenName: "t", Method: "blob.Get",
+			Backend: "celestia-node-rpc", StatusCode: 200, LatencyMs: 40, ClientIP: "1.1.1.1"},
+		{Timestamp: time.Now(), RequestID: "r2", TokenName: "t", Method: "blob.Submit",
+			Backend: "celestia-node-rpc", StatusCode: 200, LatencyMs: 60, ClientIP: "1.1.1.1"},
+		{Timestamp: time.Now(), RequestID: "r3", TokenName: "t", Method: "status",
+			Backend: "celestia-app-rpc", StatusCode: 200, LatencyMs: 20, ClientIP: "1.1.1.1"},
+	}
+	for _, e := range entries {
+		store.Push(e)
+	}
+
+	// Wait for batch flush.
+	time.Sleep(2 * time.Second)
+
+	rec := doAuthRequest(t, s, http.MethodGet, "/admin/api/backends")
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var body map[string]interface{}
+	err := json.Unmarshal(rec.Body.Bytes(), &body)
+	require.NoError(t, err)
+
+	backends := body["backends"].([]interface{})
+
+	// Build a map by name for easier assertions.
+	byName := make(map[string]map[string]interface{})
+	for _, b := range backends {
+		bm := b.(map[string]interface{})
+		byName[bm["name"].(string)] = bm
+	}
+
+	// celestia-node-rpc: avg_latency = 50, total = 2, methods = [blob.Get, blob.Submit]
+	nodeRPC := byName["celestia-node-rpc"]
+	assert.InDelta(t, 50.0, nodeRPC["avg_latency_ms"].(float64), 0.1)
+	assert.Equal(t, float64(2), nodeRPC["total_requests"].(float64))
+	methods := nodeRPC["methods"].([]interface{})
+	assert.Len(t, methods, 2)
+
+	// celestia-app-rpc: avg_latency = 20, total = 1, methods = [status]
+	appRPC := byName["celestia-app-rpc"]
+	assert.InDelta(t, 20.0, appRPC["avg_latency_ms"].(float64), 0.1)
+	assert.Equal(t, float64(1), appRPC["total_requests"].(float64))
+}
+
+func TestAdmin_BackendsWindowParam(t *testing.T) {
+	s := setupTestServer(t)
+	rec := doAuthRequest(t, s, http.MethodGet, "/admin/api/backends?window=1h")
+
+	assert.Equal(t, http.StatusOK, rec.Code)
+
+	var body map[string]interface{}
+	err := json.Unmarshal(rec.Body.Bytes(), &body)
+	require.NoError(t, err)
+	assert.NotNil(t, body["backends"])
 }
