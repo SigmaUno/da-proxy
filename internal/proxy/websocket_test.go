@@ -108,8 +108,6 @@ func TestWebSocketProxy_BidirectionalProxy(t *testing.T) {
 	backends := config.BackendsConfig{
 		CelestiaAppRPC:  config.Endpoints{echoServer.URL},
 		CelestiaNodeRPC: config.Endpoints{echoServer.URL},
-		CelestiaAppGRPC: config.Endpoints{"localhost:9090"},
-		CelestiaAppREST: config.Endpoints{echoServer.URL},
 	}
 
 	router := NewRouter(backends)
@@ -159,8 +157,6 @@ func TestWebSocketProxy_BackendUnavailable(t *testing.T) {
 	backends := config.BackendsConfig{
 		CelestiaAppRPC:  config.Endpoints{"http://127.0.0.1:1"}, // unreachable
 		CelestiaNodeRPC: config.Endpoints{"http://127.0.0.1:1"},
-		CelestiaAppGRPC: config.Endpoints{"127.0.0.1:1"},
-		CelestiaAppREST: config.Endpoints{"http://127.0.0.1:1"},
 	}
 
 	router := NewRouter(backends)

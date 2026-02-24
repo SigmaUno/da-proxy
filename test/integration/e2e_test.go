@@ -35,8 +35,6 @@ func setupE2EServer(t *testing.T) *httptest.Server {
 
 	backends := config.BackendsConfig{
 		CelestiaAppRPC:  config.Endpoints{prunedRPC},
-		CelestiaAppGRPC: config.Endpoints{prunedGRPC},
-		CelestiaAppREST: config.Endpoints{"http://195.154.212.53:1317"},
 		CelestiaNodeRPC: config.Endpoints{archivalDA},
 	}
 
@@ -64,7 +62,6 @@ func setupE2EServer(t *testing.T) *httptest.Server {
 
 	router := proxy.NewRouter(backends)
 	handler := proxy.NewHandler(router, 10*1024*1024, logger)
-	grpcProxy := proxy.NewGRPCProxy(backends.CelestiaAppGRPC, logger)
 
 	e := echo.New()
 	e.Use(
@@ -76,11 +73,6 @@ func setupE2EServer(t *testing.T) *httptest.Server {
 	)
 
 	e.Any("/*", func(c echo.Context) error {
-		ct := c.Request().Header.Get("Content-Type")
-		if len(ct) >= 16 && ct[:16] == "application/grpc" {
-			grpcProxy.Handler().ServeHTTP(c.Response(), c.Request())
-			return nil
-		}
 		return handler.HandleRequest(c)
 	})
 

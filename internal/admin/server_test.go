@@ -57,8 +57,6 @@ func setupTestServerWithDeps(t *testing.T) testServerResult {
 		Config: &config.Config{
 			Backends: config.BackendsConfig{
 				CelestiaAppRPC:  config.Endpoints{"http://127.0.0.1:26657"},
-				CelestiaAppGRPC: config.Endpoints{"127.0.0.1:9090"},
-				CelestiaAppREST: config.Endpoints{"http://127.0.0.1:1317"},
 				CelestiaNodeRPC: config.Endpoints{"http://127.0.0.1:26658"},
 			},
 			Tokens: []config.TokenConfig{
@@ -199,8 +197,8 @@ func TestAdmin_BackendsEndpoint(t *testing.T) {
 
 	backends, ok := body["backends"].([]interface{})
 	require.True(t, ok)
-	// 4 backends configured (archival not set so omitted)
-	assert.Len(t, backends, 4)
+	// 2 backends configured (archival not set so omitted)
+	assert.Len(t, backends, 2)
 
 	// Verify first backend structure.
 	first := backends[0].(map[string]interface{})

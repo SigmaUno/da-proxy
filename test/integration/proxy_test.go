@@ -24,15 +24,12 @@ const (
 	prunedRPC   = "http://195.154.212.53:26657"
 	archivalRPC = "http://195.154.103.60:26657"
 	archivalDA  = "http://195.154.103.57:26658"
-	prunedGRPC  = "195.154.212.53:9090"
 )
 
 func newTestHandler(t *testing.T) *proxy.Handler {
 	t.Helper()
 	backends := config.BackendsConfig{
 		CelestiaAppRPC:  config.Endpoints{prunedRPC},
-		CelestiaAppGRPC: config.Endpoints{prunedGRPC},
-		CelestiaAppREST: config.Endpoints{"http://195.154.212.53:1317"},
 		CelestiaNodeRPC: config.Endpoints{archivalDA},
 	}
 	router := proxy.NewRouter(backends)
@@ -264,8 +261,6 @@ func TestIntegration_ArchivalRPC_EarlyBlock(t *testing.T) {
 	// Block 500000 exists on archival but not on pruned.
 	backends := config.BackendsConfig{
 		CelestiaAppRPC:  config.Endpoints{archivalRPC},
-		CelestiaAppGRPC: config.Endpoints{prunedGRPC},
-		CelestiaAppREST: config.Endpoints{"http://195.154.103.60:1317"},
 		CelestiaNodeRPC: config.Endpoints{archivalDA},
 	}
 	router := proxy.NewRouter(backends)
@@ -330,25 +325,6 @@ func TestIntegration_MalformedJSON(t *testing.T) {
 	he, ok := err.(*echo.HTTPError)
 	require.True(t, ok)
 	assert.Equal(t, http.StatusBadRequest, he.Code)
-}
-
-// --- gRPC passthrough ---
-
-func TestIntegration_GRPC_Connection(t *testing.T) {
-	// Verify the gRPC proxy can at least establish a connection.
-	logger, _ := zap.NewDevelopment()
-	grpcProxy := proxy.NewGRPCProxy(config.Endpoints{prunedGRPC}, logger)
-
-	// Send a minimal HTTP request with gRPC content-type.
-	req := httptest.NewRequest(http.MethodPost, "/cosmos.base.tendermint.v1beta1.Service/GetLatestBlock", nil)
-	req.Header.Set("Content-Type", "application/grpc")
-	rec := httptest.NewRecorder()
-
-	grpcProxy.Handler().ServeHTTP(rec, req)
-	// gRPC over HTTP/1.1 won't give a proper gRPC response, but should
-	// at least proxy through (502 from the backend or a response).
-	// The important thing is the proxy doesn't panic.
-	assert.True(t, rec.Code >= 200, "gRPC proxy should not panic, got status %d", rec.Code)
 }
 
 // --- Direct backend verification ---

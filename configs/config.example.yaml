@@ -1,6 +1,5 @@
 server:
   listen: ":443"
-  grpc_listen: ":9090"  # Unauthenticated gRPC passthrough to celestia_app_grpc backend
   tls_cert: ""
   tls_key: ""
   read_timeout: 30s
@@ -18,8 +17,6 @@ metrics:
 backends:
   # Single endpoint (string) or multiple endpoints (list) per backend.
   celestia_app_rpc: "http://127.0.0.1:26657"
-  celestia_app_grpc: "127.0.0.1:9090"
-  celestia_app_rest: "http://127.0.0.1:1317"
   celestia_node_rpc: "http://127.0.0.1:26658"
   health_check_interval: 30s
 

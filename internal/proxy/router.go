@@ -14,8 +14,6 @@ type Backend string
 // Backend constants identify the supported proxy targets.
 const (
 	BackendCelestiaAppRPC          Backend = "celestia-app-rpc"
-	BackendCelestiaAppGRPC         Backend = "celestia-app-grpc"
-	BackendCelestiaAppREST         Backend = "celestia-app-rest"
 	BackendCelestiaNodeRPC         Backend = "celestia-node-rpc"
 	BackendCelestiaNodeArchivalRPC Backend = "celestia-node-archival-rpc"
 	BackendCelestiaAppArchivalRPC  Backend = "celestia-app-archival-rpc"
@@ -41,7 +39,7 @@ type RouteDecision struct {
 
 // Router determines which backend to forward a request to.
 type Router interface {
-	Route(contentType string, path string, body []byte) (RouteDecision, error)
+	Route(body []byte) (RouteDecision, error)
 	TargetURL(backend Backend) string
 	GetHeightTracker() *HeightTracker
 }
@@ -71,10 +69,8 @@ func NewRouterWithTracker(backends config.BackendsConfig, ht *HeightTracker) Rou
 }
 
 func buildBalancers(b config.BackendsConfig) map[Backend]*Balancer {
-	m := make(map[Backend]*Balancer, 6)
+	m := make(map[Backend]*Balancer, 4)
 	m[BackendCelestiaAppRPC] = NewBalancer(b.CelestiaAppRPC)
-	m[BackendCelestiaAppGRPC] = NewBalancer(b.CelestiaAppGRPC)
-	m[BackendCelestiaAppREST] = NewBalancer(b.CelestiaAppREST)
 	m[BackendCelestiaNodeRPC] = NewBalancer(b.CelestiaNodeRPC)
 	m[BackendCelestiaNodeArchivalRPC] = NewBalancer(b.CelestiaNodeArchivalRPC)
 	m[BackendCelestiaAppArchivalRPC] = NewBalancer(b.CelestiaAppArchivalRPC)
@@ -101,24 +97,8 @@ func (r *router) TargetURL(backend Backend) string {
 	}
 }
 
-func (r *router) Route(contentType string, path string, body []byte) (RouteDecision, error) {
-	// 1. gRPC detection.
-	if strings.HasPrefix(contentType, "application/grpc") {
-		return RouteDecision{
-			Backend:   BackendCelestiaAppGRPC,
-			TargetURL: r.TargetURL(BackendCelestiaAppGRPC),
-		}, nil
-	}
-
-	// 2. REST path detection.
-	if isRESTPath(path) {
-		return RouteDecision{
-			Backend:   BackendCelestiaAppREST,
-			TargetURL: r.TargetURL(BackendCelestiaAppREST),
-		}, nil
-	}
-
-	// 3. No body (e.g. GET /health, /status) — default to Tendermint RPC.
+func (r *router) Route(body []byte) (RouteDecision, error) {
+	// 1. No body (e.g. GET /health, /status) — default to Tendermint RPC.
 	if len(body) == 0 {
 		return RouteDecision{
 			Backend:   BackendCelestiaAppRPC,
@@ -126,7 +106,7 @@ func (r *router) Route(contentType string, path string, body []byte) (RouteDecis
 		}, nil
 	}
 
-	// 4. JSON-RPC method routing.
+	// 2. JSON-RPC method routing.
 	method, _, err := parseJSONRPCMethod(body)
 	if err != nil {
 		return RouteDecision{}, fmt.Errorf("parsing JSON-RPC request: %w", err)
@@ -184,13 +164,6 @@ func extractNamespace(method string) string {
 		return method
 	}
 	return method[:idx]
-}
-
-// isRESTPath checks if a path starts with a known Cosmos REST prefix.
-func isRESTPath(path string) bool {
-	return strings.HasPrefix(path, "/cosmos/") ||
-		strings.HasPrefix(path, "/celestia/") ||
-		strings.HasPrefix(path, "/ibc/")
 }
 
 // jsonRPCRequest represents a minimal JSON-RPC 2.0 request for method extraction.

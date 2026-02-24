@@ -6,8 +6,6 @@ server:
 
 backends:
   celestia_app_rpc: "http://195.154.212.53:26657"
-  celestia_app_grpc: "195.154.212.53:9090"
-  celestia_app_rest: "http://195.154.212.53:1317"
   celestia_node_rpc: "http://195.154.103.57:26658"
   health_check_interval: 30s
 

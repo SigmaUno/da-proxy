@@ -111,15 +111,6 @@ func (h *healthChecker) checkAll() {
 			func() HealthStatus { return h.checkHTTP(endpoint, "/health") },
 		})
 	}
-	for i, ep := range h.backends.CelestiaAppREST {
-		endpoint := ep
-		checks = append(checks, healthCheck{
-			h.endpointName("celestia-app-rest", i, len(h.backends.CelestiaAppREST)),
-			func() HealthStatus {
-				return h.checkHTTP(endpoint, "/cosmos/base/tendermint/v1beta1/syncing")
-			},
-		})
-	}
 	for i, ep := range h.backends.CelestiaNodeRPC {
 		endpoint := ep
 		checks = append(checks, healthCheck{

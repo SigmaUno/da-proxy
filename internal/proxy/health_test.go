@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -26,11 +25,6 @@ func TestHealthChecker_HealthyBackends(t *testing.T) {
 	}))
 	defer appRPC.Close()
 
-	appREST := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]bool{"syncing": false})
-	}))
-	defer appREST.Close()
-
 	nodeRPC := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`{"jsonrpc":"2.0","result":{"type":"full"},"id":1}`))
@@ -39,7 +33,6 @@ func TestHealthChecker_HealthyBackends(t *testing.T) {
 
 	backends := config.BackendsConfig{
 		CelestiaAppRPC:      config.Endpoints{appRPC.URL},
-		CelestiaAppREST:     config.Endpoints{appREST.URL},
 		CelestiaNodeRPC:     config.Endpoints{nodeRPC.URL},
 		HealthCheckInterval: time.Second,
 	}
@@ -57,10 +50,9 @@ func TestHealthChecker_HealthyBackends(t *testing.T) {
 	time.Sleep(500 * time.Millisecond)
 
 	statuses := hc.Status()
-	require.Len(t, statuses, 3)
+	require.Len(t, statuses, 2)
 
 	assert.True(t, statuses["celestia-app-rpc"].Healthy)
-	assert.True(t, statuses["celestia-app-rest"].Healthy)
 	assert.True(t, statuses["celestia-node-rpc"].Healthy)
 
 	for _, s := range statuses {
@@ -72,7 +64,6 @@ func TestHealthChecker_HealthyBackends(t *testing.T) {
 func TestHealthChecker_UnhealthyBackend(t *testing.T) {
 	backends := config.BackendsConfig{
 		CelestiaAppRPC:      config.Endpoints{"http://127.0.0.1:1"},
-		CelestiaAppREST:     config.Endpoints{"http://127.0.0.1:1"},
 		CelestiaNodeRPC:     config.Endpoints{"http://127.0.0.1:1"},
 		HealthCheckInterval: time.Second,
 	}
@@ -107,7 +98,6 @@ func TestHealthChecker_MetricsUpdated(t *testing.T) {
 
 	backends := config.BackendsConfig{
 		CelestiaAppRPC:      config.Endpoints{healthy.URL},
-		CelestiaAppREST:     config.Endpoints{healthy.URL},
 		CelestiaNodeRPC:     config.Endpoints{healthy.URL},
 		HealthCheckInterval: time.Second,
 	}
@@ -154,7 +144,6 @@ func TestHealthChecker_StateChangeLogged(t *testing.T) {
 
 	backends := config.BackendsConfig{
 		CelestiaAppRPC:      config.Endpoints{srv.URL},
-		CelestiaAppREST:     config.Endpoints{srv.URL},
 		CelestiaNodeRPC:     config.Endpoints{srv.URL},
 		HealthCheckInterval: 200 * time.Millisecond,
 	}

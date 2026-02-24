@@ -20,8 +20,6 @@ import (
 func TestIntegration_HealthChecker_AllBackends(t *testing.T) {
 	backends := config.BackendsConfig{
 		CelestiaAppRPC:      config.Endpoints{prunedRPC},
-		CelestiaAppGRPC:     config.Endpoints{prunedGRPC},
-		CelestiaAppREST:     config.Endpoints{"http://195.154.212.53:1317"},
 		CelestiaNodeRPC:     config.Endpoints{archivalDA},
 		HealthCheckInterval: 5 * time.Second,
 	}
@@ -55,19 +53,11 @@ func TestIntegration_HealthChecker_AllBackends(t *testing.T) {
 	assert.True(t, nodeRPC.Healthy, "celestia-node-rpc should be healthy")
 	assert.True(t, nodeRPC.LatencyMs > 0, "latency should be positive")
 	assert.Empty(t, nodeRPC.Error)
-
-	// celestia-app-rest: port 1317 is closed, so this should be unhealthy.
-	appREST, ok := statuses["celestia-app-rest"]
-	require.True(t, ok, "celestia-app-rest should be checked")
-	assert.False(t, appREST.Healthy, "celestia-app-rest should be unhealthy (port 1317 closed)")
-	assert.NotEmpty(t, appREST.Error)
 }
 
 func TestIntegration_HealthChecker_MetricsUpdated(t *testing.T) {
 	backends := config.BackendsConfig{
 		CelestiaAppRPC:      config.Endpoints{prunedRPC},
-		CelestiaAppGRPC:     config.Endpoints{prunedGRPC},
-		CelestiaAppREST:     config.Endpoints{"http://195.154.212.53:1317"},
 		CelestiaNodeRPC:     config.Endpoints{archivalDA},
 		HealthCheckInterval: 5 * time.Second,
 	}
@@ -91,8 +81,8 @@ func TestIntegration_HealthChecker_MetricsUpdated(t *testing.T) {
 	for _, fam := range families {
 		if fam.GetName() == "daproxy_backend_up" {
 			foundBackendUp = true
-			// Should have 3 backends checked.
-			assert.GreaterOrEqual(t, len(fam.GetMetric()), 3)
+			// Should have 2 backends checked.
+			assert.GreaterOrEqual(t, len(fam.GetMetric()), 2)
 
 			for _, metric := range fam.GetMetric() {
 				for _, label := range metric.GetLabel() {
@@ -102,8 +92,6 @@ func TestIntegration_HealthChecker_MetricsUpdated(t *testing.T) {
 							assert.Equal(t, float64(1), metric.GetGauge().GetValue())
 						case "celestia-node-rpc":
 							assert.Equal(t, float64(1), metric.GetGauge().GetValue())
-						case "celestia-app-rest":
-							assert.Equal(t, float64(0), metric.GetGauge().GetValue())
 						}
 					}
 				}
@@ -116,8 +104,6 @@ func TestIntegration_HealthChecker_MetricsUpdated(t *testing.T) {
 func TestIntegration_HealthChecker_ArchivalNode(t *testing.T) {
 	backends := config.BackendsConfig{
 		CelestiaAppRPC:      config.Endpoints{archivalRPC},
-		CelestiaAppGRPC:     config.Endpoints{"195.154.103.60:9090"},
-		CelestiaAppREST:     config.Endpoints{"http://195.154.103.60:1317"},
 		CelestiaNodeRPC:     config.Endpoints{archivalDA},
 		HealthCheckInterval: 5 * time.Second,
 	}

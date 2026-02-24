@@ -38,8 +38,6 @@ metrics:
 
 backends:
   celestia_app_rpc: "http://10.0.0.1:26657"
-  celestia_app_grpc: "10.0.0.1:9090"
-  celestia_app_rest: "http://10.0.0.1:1317"
   celestia_node_rpc: "http://10.0.0.1:26658"
   health_check_interval: 10s
 
@@ -92,8 +90,6 @@ func TestLoad_FullConfig(t *testing.T) {
 	assert.False(t, cfg.Metrics.IsEnabled())
 
 	assert.Equal(t, Endpoints{"http://10.0.0.1:26657"}, cfg.Backends.CelestiaAppRPC)
-	assert.Equal(t, Endpoints{"10.0.0.1:9090"}, cfg.Backends.CelestiaAppGRPC)
-	assert.Equal(t, Endpoints{"http://10.0.0.1:1317"}, cfg.Backends.CelestiaAppREST)
 	assert.Equal(t, Endpoints{"http://10.0.0.1:26658"}, cfg.Backends.CelestiaNodeRPC)
 	assert.Equal(t, 10*time.Second, cfg.Backends.HealthCheckInterval)
 
@@ -132,8 +128,6 @@ func TestLoad_MinimalConfigAppliesDefaults(t *testing.T) {
 	assert.True(t, cfg.Metrics.IsEnabled())
 
 	assert.Equal(t, Endpoints{"http://127.0.0.1:26657"}, cfg.Backends.CelestiaAppRPC)
-	assert.Equal(t, Endpoints{"127.0.0.1:9090"}, cfg.Backends.CelestiaAppGRPC)
-	assert.Equal(t, Endpoints{"http://127.0.0.1:1317"}, cfg.Backends.CelestiaAppREST)
 	assert.Equal(t, Endpoints{"http://127.0.0.1:26658"}, cfg.Backends.CelestiaNodeRPC)
 	assert.Equal(t, 30*time.Second, cfg.Backends.HealthCheckInterval)
 

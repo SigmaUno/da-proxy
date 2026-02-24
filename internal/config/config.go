@@ -60,7 +60,6 @@ func (c CacheConfig) MaxEntrySizeBytes() (int64, error) {
 // ServerConfig holds proxy server settings.
 type ServerConfig struct {
 	Listen       string        `yaml:"listen"`
-	GRPCListen   string        `yaml:"grpc_listen"`
 	TLSCert      string        `yaml:"tls_cert"`
 	TLSKey       string        `yaml:"tls_key"`
 	ReadTimeout  time.Duration `yaml:"read_timeout"`
@@ -113,8 +112,6 @@ func (e Endpoints) First() string {
 // across them using round-robin selection.
 type BackendsConfig struct {
 	CelestiaAppRPC          Endpoints     `yaml:"celestia_app_rpc"`
-	CelestiaAppGRPC         Endpoints     `yaml:"celestia_app_grpc"`
-	CelestiaAppREST         Endpoints     `yaml:"celestia_app_rest"`
 	CelestiaNodeRPC         Endpoints     `yaml:"celestia_node_rpc"`
 	CelestiaNodeArchivalRPC Endpoints     `yaml:"celestia_node_archival_rpc"`
 	CelestiaAppArchivalRPC  Endpoints     `yaml:"celestia_app_archival_rpc"`
@@ -231,9 +228,6 @@ func applyDefaults(c *Config) {
 	if c.Server.Listen == "" {
 		c.Server.Listen = ":443"
 	}
-	if c.Server.GRPCListen == "" {
-		c.Server.GRPCListen = ":9090"
-	}
 	if c.Server.ReadTimeout == 0 {
 		c.Server.ReadTimeout = 30 * time.Second
 	}
@@ -246,12 +240,6 @@ func applyDefaults(c *Config) {
 
 	if len(c.Backends.CelestiaAppRPC) == 0 {
 		c.Backends.CelestiaAppRPC = Endpoints{"http://127.0.0.1:26657"}
-	}
-	if len(c.Backends.CelestiaAppGRPC) == 0 {
-		c.Backends.CelestiaAppGRPC = Endpoints{"127.0.0.1:9090"}
-	}
-	if len(c.Backends.CelestiaAppREST) == 0 {
-		c.Backends.CelestiaAppREST = Endpoints{"http://127.0.0.1:1317"}
 	}
 	if len(c.Backends.CelestiaNodeRPC) == 0 {
 		c.Backends.CelestiaNodeRPC = Endpoints{"http://127.0.0.1:26658"}

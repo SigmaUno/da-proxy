@@ -1,3 +1,5 @@
+// Package proxy implements the reverse proxy routing, load balancing, and
+// request handling for Celestia backend services.
 package proxy
 
 import (

@@ -11,8 +11,6 @@ import (
 func defaultBackends() config.BackendsConfig {
 	return config.BackendsConfig{
 		CelestiaAppRPC:  config.Endpoints{"http://localhost:26657"},
-		CelestiaAppGRPC: config.Endpoints{"localhost:9090"},
-		CelestiaAppREST: config.Endpoints{"http://localhost:1317"},
 		CelestiaNodeRPC: config.Endpoints{"http://localhost:26658"},
 	}
 }
@@ -38,142 +36,80 @@ func TestRouter_Route(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		contentType string
-		path        string
 		body        []byte
 		wantBackend Backend
 		wantMethod  string
 		wantErr     bool
 	}{
-		// gRPC routing
-		{
-			name:        "gRPC request",
-			contentType: "application/grpc",
-			path:        "/",
-			body:        nil,
-			wantBackend: BackendCelestiaAppGRPC,
-		},
-		{
-			name:        "gRPC with proto",
-			contentType: "application/grpc+proto",
-			path:        "/",
-			body:        nil,
-			wantBackend: BackendCelestiaAppGRPC,
-		},
-
-		// REST path routing
-		{
-			name:        "cosmos REST path",
-			contentType: "application/json",
-			path:        "/cosmos/bank/v1beta1/balances/celestia1abc",
-			wantBackend: BackendCelestiaAppREST,
-		},
-		{
-			name:        "celestia REST path",
-			contentType: "application/json",
-			path:        "/celestia/blob/v1/params",
-			wantBackend: BackendCelestiaAppREST,
-		},
-		{
-			name:        "ibc REST path",
-			contentType: "application/json",
-			path:        "/ibc/core/client/v1/client_states",
-			wantBackend: BackendCelestiaAppREST,
-		},
-
 		// DA namespace methods → celestia-node
 		{
 			name:        "blob.Submit",
-			contentType: "application/json",
-			path:        "/",
 			body:        jsonRPCBody("blob.Submit"),
 			wantBackend: BackendCelestiaNodeRPC,
 			wantMethod:  "blob.Submit",
 		},
 		{
 			name:        "blob.Get",
-			contentType: "application/json",
-			path:        "/",
 			body:        jsonRPCBody("blob.Get"),
 			wantBackend: BackendCelestiaNodeRPC,
 			wantMethod:  "blob.Get",
 		},
 		{
 			name:        "blob.GetAll",
-			contentType: "application/json",
-			path:        "/",
 			body:        jsonRPCBody("blob.GetAll"),
 			wantBackend: BackendCelestiaNodeRPC,
 			wantMethod:  "blob.GetAll",
 		},
 		{
 			name:        "blob.GetProof",
-			contentType: "application/json",
-			path:        "/",
 			body:        jsonRPCBody("blob.GetProof"),
 			wantBackend: BackendCelestiaNodeRPC,
 			wantMethod:  "blob.GetProof",
 		},
 		{
 			name:        "header.GetByHeight",
-			contentType: "application/json",
-			path:        "/",
 			body:        jsonRPCBody("header.GetByHeight"),
 			wantBackend: BackendCelestiaNodeRPC,
 			wantMethod:  "header.GetByHeight",
 		},
 		{
 			name:        "header.NetworkHead",
-			contentType: "application/json",
-			path:        "/",
 			body:        jsonRPCBody("header.NetworkHead"),
 			wantBackend: BackendCelestiaNodeRPC,
 			wantMethod:  "header.NetworkHead",
 		},
 		{
 			name:        "share.GetSharesByNamespace",
-			contentType: "application/json",
-			path:        "/",
 			body:        jsonRPCBody("share.GetSharesByNamespace"),
 			wantBackend: BackendCelestiaNodeRPC,
 			wantMethod:  "share.GetSharesByNamespace",
 		},
 		{
 			name:        "das.SamplingStats",
-			contentType: "application/json",
-			path:        "/",
 			body:        jsonRPCBody("das.SamplingStats"),
 			wantBackend: BackendCelestiaNodeRPC,
 			wantMethod:  "das.SamplingStats",
 		},
 		{
 			name:        "state.Balance",
-			contentType: "application/json",
-			path:        "/",
 			body:        jsonRPCBody("state.Balance"),
 			wantBackend: BackendCelestiaNodeRPC,
 			wantMethod:  "state.Balance",
 		},
 		{
 			name:        "state.SubmitPayForBlob",
-			contentType: "application/json",
-			path:        "/",
 			body:        jsonRPCBody("state.SubmitPayForBlob"),
 			wantBackend: BackendCelestiaNodeRPC,
 			wantMethod:  "state.SubmitPayForBlob",
 		},
 		{
 			name:        "p2p.Info",
-			contentType: "application/json",
-			path:        "/",
 			body:        jsonRPCBody("p2p.Info"),
 			wantBackend: BackendCelestiaNodeRPC,
 			wantMethod:  "p2p.Info",
 		},
 		{
 			name:        "node.Info",
-			contentType: "application/json",
-			path:        "/",
 			body:        jsonRPCBody("node.Info"),
 			wantBackend: BackendCelestiaNodeRPC,
 			wantMethod:  "node.Info",
@@ -182,88 +118,66 @@ func TestRouter_Route(t *testing.T) {
 		// Consensus/Tendermint methods → celestia-app
 		{
 			name:        "status",
-			contentType: "application/json",
-			path:        "/",
 			body:        jsonRPCBody("status"),
 			wantBackend: BackendCelestiaAppRPC,
 			wantMethod:  "status",
 		},
 		{
 			name:        "health",
-			contentType: "application/json",
-			path:        "/",
 			body:        jsonRPCBody("health"),
 			wantBackend: BackendCelestiaAppRPC,
 			wantMethod:  "health",
 		},
 		{
 			name:        "block",
-			contentType: "application/json",
-			path:        "/",
 			body:        jsonRPCBody("block"),
 			wantBackend: BackendCelestiaAppRPC,
 			wantMethod:  "block",
 		},
 		{
 			name:        "block_results",
-			contentType: "application/json",
-			path:        "/",
 			body:        jsonRPCBody("block_results"),
 			wantBackend: BackendCelestiaAppRPC,
 			wantMethod:  "block_results",
 		},
 		{
 			name:        "tx",
-			contentType: "application/json",
-			path:        "/",
 			body:        jsonRPCBody("tx"),
 			wantBackend: BackendCelestiaAppRPC,
 			wantMethod:  "tx",
 		},
 		{
 			name:        "tx_search",
-			contentType: "application/json",
-			path:        "/",
 			body:        jsonRPCBody("tx_search"),
 			wantBackend: BackendCelestiaAppRPC,
 			wantMethod:  "tx_search",
 		},
 		{
 			name:        "broadcast_tx_sync",
-			contentType: "application/json",
-			path:        "/",
 			body:        jsonRPCBody("broadcast_tx_sync"),
 			wantBackend: BackendCelestiaAppRPC,
 			wantMethod:  "broadcast_tx_sync",
 		},
 		{
 			name:        "abci_query",
-			contentType: "application/json",
-			path:        "/",
 			body:        jsonRPCBody("abci_query"),
 			wantBackend: BackendCelestiaAppRPC,
 			wantMethod:  "abci_query",
 		},
 		{
 			name:        "consensus_state",
-			contentType: "application/json",
-			path:        "/",
 			body:        jsonRPCBody("consensus_state"),
 			wantBackend: BackendCelestiaAppRPC,
 			wantMethod:  "consensus_state",
 		},
 		{
 			name:        "validators",
-			contentType: "application/json",
-			path:        "/",
 			body:        jsonRPCBody("validators"),
 			wantBackend: BackendCelestiaAppRPC,
 			wantMethod:  "validators",
 		},
 		{
 			name:        "net_info",
-			contentType: "application/json",
-			path:        "/",
 			body:        jsonRPCBody("net_info"),
 			wantBackend: BackendCelestiaAppRPC,
 			wantMethod:  "net_info",
@@ -272,37 +186,29 @@ func TestRouter_Route(t *testing.T) {
 		// Error cases
 		{
 			name:        "empty body defaults to tendermint",
-			contentType: "application/json",
-			path:        "/",
 			body:        []byte{},
 			wantBackend: BackendCelestiaAppRPC,
 		},
 		{
 			name:        "nil body defaults to tendermint",
-			contentType: "application/json",
-			path:        "/",
 			body:        nil,
 			wantBackend: BackendCelestiaAppRPC,
 		},
 		{
-			name:        "invalid JSON",
-			contentType: "application/json",
-			path:        "/",
-			body:        []byte(`{invalid`),
-			wantErr:     true,
+			name:    "invalid JSON",
+			body:    []byte(`{invalid`),
+			wantErr: true,
 		},
 		{
-			name:        "missing method field",
-			contentType: "application/json",
-			path:        "/",
-			body:        []byte(`{"jsonrpc":"2.0","id":1}`),
-			wantErr:     true,
+			name:    "missing method field",
+			body:    []byte(`{"jsonrpc":"2.0","id":1}`),
+			wantErr: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := r.Route(tt.contentType, tt.path, tt.body)
+			got, err := r.Route(tt.body)
 			if tt.wantErr {
 				require.Error(t, err)
 				return
@@ -322,7 +228,7 @@ func TestRouter_BatchRequest(t *testing.T) {
 
 	t.Run("batch with same namespace", func(t *testing.T) {
 		body := jsonRPCBatch("blob.Get", "blob.Submit")
-		got, err := r.Route("application/json", "/", body)
+		got, err := r.Route(body)
 		require.NoError(t, err)
 		assert.Equal(t, BackendCelestiaNodeRPC, got.Backend)
 		assert.Equal(t, "blob.Get", got.Method)
@@ -330,20 +236,20 @@ func TestRouter_BatchRequest(t *testing.T) {
 
 	t.Run("batch routed by first method", func(t *testing.T) {
 		body := jsonRPCBatch("status", "block")
-		got, err := r.Route("application/json", "/", body)
+		got, err := r.Route(body)
 		require.NoError(t, err)
 		assert.Equal(t, BackendCelestiaAppRPC, got.Backend)
 		assert.Equal(t, "status", got.Method)
 	})
 
 	t.Run("empty batch", func(t *testing.T) {
-		_, err := r.Route("application/json", "/", []byte(`[]`))
+		_, err := r.Route([]byte(`[]`))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "empty JSON-RPC batch")
 	})
 
 	t.Run("invalid batch JSON", func(t *testing.T) {
-		_, err := r.Route("application/json", "/", []byte(`[{invalid}]`))
+		_, err := r.Route([]byte(`[{invalid}]`))
 		require.Error(t, err)
 	})
 }
@@ -367,33 +273,11 @@ func TestExtractNamespace(t *testing.T) {
 	}
 }
 
-func TestIsRESTPath(t *testing.T) {
-	tests := []struct {
-		path string
-		want bool
-	}{
-		{"/cosmos/bank/v1beta1/balances", true},
-		{"/celestia/blob/v1/params", true},
-		{"/ibc/core/client/v1/client_states", true},
-		{"/", false},
-		{"/other/path", false},
-		{"", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.path, func(t *testing.T) {
-			assert.Equal(t, tt.want, isRESTPath(tt.path))
-		})
-	}
-}
-
 func TestTargetURL(t *testing.T) {
 	backends := defaultBackends()
 	r := NewRouter(backends)
 
 	assert.Equal(t, "http://localhost:26657", r.TargetURL(BackendCelestiaAppRPC))
-	assert.Equal(t, "localhost:9090", r.TargetURL(BackendCelestiaAppGRPC))
-	assert.Equal(t, "http://localhost:1317", r.TargetURL(BackendCelestiaAppREST))
 	assert.Equal(t, "http://localhost:26658", r.TargetURL(BackendCelestiaNodeRPC))
 	assert.Equal(t, "", r.TargetURL(Backend("unknown")))
 }
@@ -401,8 +285,6 @@ func TestTargetURL(t *testing.T) {
 func TestRouter_HeightAwareRouting(t *testing.T) {
 	backends := config.BackendsConfig{
 		CelestiaAppRPC:          config.Endpoints{"http://localhost:26657"},
-		CelestiaAppGRPC:         config.Endpoints{"localhost:9090"},
-		CelestiaAppREST:         config.Endpoints{"http://localhost:1317"},
 		CelestiaNodeRPC:         config.Endpoints{"http://localhost:26658"},
 		CelestiaNodeArchivalRPC: config.Endpoints{"http://localhost:36658"},
 		CelestiaAppArchivalRPC:  config.Endpoints{"http://localhost:36657"},
@@ -415,7 +297,7 @@ func TestRouter_HeightAwareRouting(t *testing.T) {
 
 	t.Run("recent height goes to pruned", func(t *testing.T) {
 		body := []byte(`{"jsonrpc":"2.0","id":1,"method":"block","params":["4500"]}`)
-		got, err := r.Route("application/json", "/", body)
+		got, err := r.Route(body)
 		require.NoError(t, err)
 		assert.Equal(t, BackendCelestiaAppRPC, got.Backend)
 		assert.Equal(t, "http://localhost:26657", got.TargetURL)
@@ -423,7 +305,7 @@ func TestRouter_HeightAwareRouting(t *testing.T) {
 
 	t.Run("historical height goes to archival app", func(t *testing.T) {
 		body := []byte(`{"jsonrpc":"2.0","id":1,"method":"block","params":["100"]}`)
-		got, err := r.Route("application/json", "/", body)
+		got, err := r.Route(body)
 		require.NoError(t, err)
 		assert.Equal(t, BackendCelestiaAppArchivalRPC, got.Backend)
 		assert.Equal(t, "http://localhost:36657", got.TargetURL)
@@ -431,7 +313,7 @@ func TestRouter_HeightAwareRouting(t *testing.T) {
 
 	t.Run("DA historical height goes to archival node", func(t *testing.T) {
 		body := []byte(`{"jsonrpc":"2.0","id":1,"method":"blob.Get","params":[100,"AAAA","AA=="]}`)
-		got, err := r.Route("application/json", "/", body)
+		got, err := r.Route(body)
 		require.NoError(t, err)
 		assert.Equal(t, BackendCelestiaNodeArchivalRPC, got.Backend)
 		assert.Equal(t, "http://localhost:36658", got.TargetURL)
@@ -439,7 +321,7 @@ func TestRouter_HeightAwareRouting(t *testing.T) {
 
 	t.Run("DA recent height goes to pruned node", func(t *testing.T) {
 		body := []byte(`{"jsonrpc":"2.0","id":1,"method":"blob.Get","params":[4500,"AAAA","AA=="]}`)
-		got, err := r.Route("application/json", "/", body)
+		got, err := r.Route(body)
 		require.NoError(t, err)
 		assert.Equal(t, BackendCelestiaNodeRPC, got.Backend)
 		assert.Equal(t, "http://localhost:26658", got.TargetURL)
@@ -447,14 +329,14 @@ func TestRouter_HeightAwareRouting(t *testing.T) {
 
 	t.Run("no height param goes to pruned", func(t *testing.T) {
 		body := []byte(`{"jsonrpc":"2.0","id":1,"method":"status","params":[]}`)
-		got, err := r.Route("application/json", "/", body)
+		got, err := r.Route(body)
 		require.NoError(t, err)
 		assert.Equal(t, BackendCelestiaAppRPC, got.Backend)
 	})
 
 	t.Run("latest height (0) goes to pruned", func(t *testing.T) {
 		body := []byte(`{"jsonrpc":"2.0","id":1,"method":"block","params":["0"]}`)
-		got, err := r.Route("application/json", "/", body)
+		got, err := r.Route(body)
 		require.NoError(t, err)
 		assert.Equal(t, BackendCelestiaAppRPC, got.Backend)
 	})
@@ -472,8 +354,6 @@ func TestTargetURL_ArchivalFallback(t *testing.T) {
 func TestTargetURL_WithArchival(t *testing.T) {
 	backends := config.BackendsConfig{
 		CelestiaAppRPC:          config.Endpoints{"http://localhost:26657"},
-		CelestiaAppGRPC:         config.Endpoints{"localhost:9090"},
-		CelestiaAppREST:         config.Endpoints{"http://localhost:1317"},
 		CelestiaNodeRPC:         config.Endpoints{"http://localhost:26658"},
 		CelestiaNodeArchivalRPC: config.Endpoints{"http://archival:36658"},
 		CelestiaAppArchivalRPC:  config.Endpoints{"http://archival:36657"},

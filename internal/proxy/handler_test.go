@@ -69,8 +69,6 @@ func setupHandlerTest(t *testing.T, backendHandler http.HandlerFunc) (*echo.Echo
 
 	backends := config.BackendsConfig{
 		CelestiaAppRPC:  config.Endpoints{backend.URL},
-		CelestiaAppGRPC: config.Endpoints{backend.Listener.Addr().String()},
-		CelestiaAppREST: config.Endpoints{backend.URL},
 		CelestiaNodeRPC: config.Endpoints{backend.URL},
 	}
 
@@ -135,29 +133,10 @@ func TestHandler_JSONRPCToConsensus(t *testing.T) {
 	assert.Equal(t, "celestia-app-rpc", rec.Header().Get(HeaderXDABackend))
 }
 
-func TestHandler_RESTProxy(t *testing.T) {
-	var receivedPath string
-	e, _ := setupHandlerTest(t, func(w http.ResponseWriter, r *http.Request) {
-		receivedPath = r.URL.Path
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"balances":[]}`))
-	})
-
-	req := httptest.NewRequest(http.MethodGet, "/cosmos/bank/v1beta1/balances/celestia1abc", nil)
-	rec := httptest.NewRecorder()
-	e.ServeHTTP(rec, req)
-
-	assert.Equal(t, http.StatusOK, rec.Code)
-	assert.Equal(t, "/cosmos/bank/v1beta1/balances/celestia1abc", receivedPath)
-	assert.Equal(t, "celestia-app-rest", rec.Header().Get(HeaderXDABackend))
-}
-
 func TestHandler_BodyTooLarge(t *testing.T) {
 	backends := config.BackendsConfig{
 		CelestiaAppRPC:  config.Endpoints{"http://localhost:26657"},
 		CelestiaNodeRPC: config.Endpoints{"http://localhost:26658"},
-		CelestiaAppGRPC: config.Endpoints{"localhost:9090"},
-		CelestiaAppREST: config.Endpoints{"http://localhost:1317"},
 	}
 	router := NewRouter(backends)
 	handler := NewHandler(router, 10, zap.NewNop()) // 10 bytes max
@@ -191,8 +170,6 @@ func TestHandler_BackendDown(t *testing.T) {
 	backends := config.BackendsConfig{
 		CelestiaAppRPC:  config.Endpoints{"http://127.0.0.1:1"}, // unreachable port
 		CelestiaNodeRPC: config.Endpoints{"http://127.0.0.1:1"},
-		CelestiaAppGRPC: config.Endpoints{"127.0.0.1:1"},
-		CelestiaAppREST: config.Endpoints{"http://127.0.0.1:1"},
 	}
 	router := NewRouter(backends)
 	handler := NewHandler(router, 10*1024*1024, zap.NewNop())
@@ -249,8 +226,6 @@ func setupHandlerTestWithTokenInfo(t *testing.T, info auth.TokenInfo, backendHan
 
 	backends := config.BackendsConfig{
 		CelestiaAppRPC:  config.Endpoints{backend.URL},
-		CelestiaAppGRPC: config.Endpoints{backend.Listener.Addr().String()},
-		CelestiaAppREST: config.Endpoints{backend.URL},
 		CelestiaNodeRPC: config.Endpoints{backend.URL},
 	}
 
@@ -378,8 +353,6 @@ func setupHandlerTestWithCache(t *testing.T, mc *mockCache, backendHandler http.
 
 	backends := config.BackendsConfig{
 		CelestiaAppRPC:  config.Endpoints{backend.URL},
-		CelestiaAppGRPC: config.Endpoints{backend.Listener.Addr().String()},
-		CelestiaAppREST: config.Endpoints{backend.URL},
 		CelestiaNodeRPC: config.Endpoints{backend.URL},
 	}
 

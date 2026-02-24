@@ -48,8 +48,6 @@ func (h *handlers) handleBackends(c echo.Context) error {
 		b := h.deps.Config.Backends
 		defs = []backendDef{
 			{"celestia-app-rpc", b.CelestiaAppRPC},
-			{"celestia-app-grpc", b.CelestiaAppGRPC},
-			{"celestia-app-rest", b.CelestiaAppREST},
 			{"celestia-node-rpc", b.CelestiaNodeRPC},
 			{"celestia-node-archival-rpc", b.CelestiaNodeArchivalRPC},
 			{"celestia-app-archival-rpc", b.CelestiaAppArchivalRPC},
@@ -116,7 +114,7 @@ func (h *handlers) handleBackends(c echo.Context) error {
 			info.AvgLatencyMs = stat.AvgLatencyMs
 			info.TotalRequests = stat.TotalRequests
 			if len(stat.Methods) > 0 {
-				// Filter out empty method strings (REST/gRPC may log empty method).
+				// Filter out empty method strings.
 				methods := make([]string, 0, len(stat.Methods))
 				for _, m := range stat.Methods {
 					if m != "" {

@@ -58,7 +58,6 @@ func WithCache(c cache.Cache) HandlerOption {
 // HandleRequest is the Echo handler for all proxied requests.
 func (h *Handler) HandleRequest(c echo.Context) error {
 	req := c.Request()
-	contentType := req.Header.Get("Content-Type")
 	path := req.URL.Path
 
 	// Read and buffer the request body for method inspection.
@@ -78,7 +77,7 @@ func (h *Handler) HandleRequest(c echo.Context) error {
 	}
 
 	// Route the request.
-	decision, err := h.router.Route(contentType, path, body)
+	decision, err := h.router.Route(body)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
 	}
@@ -135,8 +134,8 @@ func (h *Handler) HandleRequest(c echo.Context) error {
 			outReq.URL.Host = targetURL.Host
 			outReq.Host = targetURL.Host
 
-			// For REST requests, preserve the path.
-			// For JSON-RPC, path is just "/".
+			// Preserve the request path (e.g. /health, /status for GET).
+			// For JSON-RPC POST requests, path is just "/".
 			if path != "" && path != "/" {
 				outReq.URL.Path = path
 			} else {
