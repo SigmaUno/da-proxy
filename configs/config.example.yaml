@@ -1,5 +1,6 @@
 server:
   listen: ":443"
+  grpc_listen: ":9090"  # Unauthenticated gRPC passthrough to celestia_app_grpc backend
   tls_cert: ""
   tls_key: ""
   read_timeout: 30s

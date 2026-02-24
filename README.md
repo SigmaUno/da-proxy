@@ -12,37 +12,47 @@ A unified HTTPS reverse proxy gateway for Celestia infrastructure. DA-Proxy expo
 - **Admin REST API** with Basic Auth for request logs, health, and metrics summaries
 - **Request log storage** via in-memory ring buffer and SQLite
 - **Backend health checks** with automatic monitoring
-- **gRPC passthrough** for Cosmos SDK gRPC queries
+- **Dedicated gRPC port** (`:9090`) — unauthenticated transparent proxy to Cosmos SDK gRPC
 - **Graceful shutdown** with in-flight request draining
 
 ## Architecture
 
 ```
-                    ┌──────────────────────────────────────┐
-                    │            DA-Proxy (Go)              │
-                    │                                        │
-  HTTPS request     │  ┌──────────┐    ┌───────────────┐    │
-─────────────────►  │  │   Auth   │───►│ Method Router  │    │
- (URL path token)   │  │Middleware│    │                │    │
-                    │  └──────────┘    └──────┬────────┘    │
-                    │                    │    │    │         │
-                    │           ┌────────┘    │    └──────┐  │
-                    │           ▼             ▼           ▼  │
-                    │  ┌────────────┐ ┌──────────┐ ┌─────┐  │
-                    │  │celestia-app│ │celestia-  │ │gRPC │  │
-                    │  │ RPC :26657 │ │node :26658│ │:9090│  │
-                    │  └────────────┘ └──────────┘ └─────┘  │
-                    └──────────────────────────────────────┘
+                    ┌───────────────────────────────────────┐
+                    │            DA-Proxy (Go)               │
+                    │                                         │
+  HTTPS :443        │  ┌──────────┐    ┌───────────────┐     │
+─────────────────►  │  │   Auth   │───►│ Method Router  │     │
+ (URL path token)   │  │Middleware│    │                │     │
+                    │  └──────────┘    └──────┬────────┘     │
+                    │                    │    │    │          │
+                    │           ┌────────┘    │    └───────┐  │
+                    │           ▼             ▼            ▼  │
+                    │  ┌────────────┐ ┌──────────┐ ┌──────┐  │
+                    │  │celestia-app│ │celestia-  │ │ REST │  │
+                    │  │ RPC :26657 │ │node :26658│ │:1317 │  │
+                    │  └────────────┘ └──────────┘ └──────┘  │
+                    │                                         │
+  gRPC :9090        │         (transparent passthrough)       │
+─────────────────►  │  ┌──────────────────────────────────┐  │
+ (no auth)          │  │   celestia-app gRPC backend       │  │
+                    │  └──────────────────────────────────┘  │
+                    └───────────────────────────────────────┘
 ```
 
 ## Routing Rules
 
+**HTTP/JSON-RPC proxy (`:443`, authenticated):**
+
 | Condition | Backend |
 |-----------|---------|
-| `Content-Type: application/grpc` | celestia-app:9090 (gRPC) |
 | Path starts with `/cosmos/`, `/celestia/`, `/ibc/` | celestia-app:1317 (REST) |
 | Method prefix in `blob`, `header`, `share`, `das`, `state`, `p2p`, `node` | celestia-node:26658 |
 | Everything else | celestia-app:26657 (Tendermint RPC) |
+
+**gRPC proxy (`:9090`, unauthenticated):**
+
+All gRPC traffic on port `:9090` is forwarded directly to the `celestia_app_grpc` backend with no authentication or middleware.
 
 ## Quick Start
 
@@ -82,6 +92,7 @@ Key configuration sections:
 ```yaml
 server:
   listen: ":443"              # Proxy listen address
+  grpc_listen: ":9090"        # gRPC passthrough port (unauthenticated)
   tls_cert: ""                # Path to TLS cert (empty = no TLS)
   tls_key: ""                 # Path to TLS key
   read_timeout: 30s
@@ -215,6 +226,22 @@ curl https://proxy.example.com/<token>/cosmos/bank/v1beta1/balances/celestia1...
 
 The token is stripped from the path before forwarding to backends and is never logged in plaintext.
 
+### gRPC
+
+gRPC is served on a dedicated port (default `:9090`) with no authentication:
+
+```bash
+# List available services
+grpcurl proxy.example.com:9090 list
+
+# Get latest block
+grpcurl proxy.example.com:9090 cosmos.base.tendermint.v1beta1.Service/GetLatestBlock
+
+# Query a balance
+grpcurl -d '{"address":"celestia1..."}' proxy.example.com:9090 \
+  cosmos.bank.v1beta1.Query/Balance
+```
+
 ## Admin API
 
 The admin API is served on a separate port (default `:8080`) with HTTP Basic Auth.
@@ -223,6 +250,7 @@ The admin API is served on a separate port (default `:8080`) with HTTP Basic Aut
 |----------|-------------|
 | `GET /admin/api/health` | Backend health status |
 | `GET /admin/api/status` | Proxy uptime, version, token count |
+| `GET /admin/api/backends` | Configured backends with avg latency and used methods |
 | `GET /admin/api/logs` | Query request logs with filtering |
 | `GET /admin/api/logs/stream` | SSE stream of real-time logs |
 | `GET /admin/api/logs/export` | Export logs as JSON or CSV |

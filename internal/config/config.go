@@ -60,6 +60,7 @@ func (c CacheConfig) MaxEntrySizeBytes() (int64, error) {
 // ServerConfig holds proxy server settings.
 type ServerConfig struct {
 	Listen       string        `yaml:"listen"`
+	GRPCListen   string        `yaml:"grpc_listen"`
 	TLSCert      string        `yaml:"tls_cert"`
 	TLSKey       string        `yaml:"tls_key"`
 	ReadTimeout  time.Duration `yaml:"read_timeout"`
@@ -229,6 +230,9 @@ func (c *Config) Validate() error {
 func applyDefaults(c *Config) {
 	if c.Server.Listen == "" {
 		c.Server.Listen = ":443"
+	}
+	if c.Server.GRPCListen == "" {
+		c.Server.GRPCListen = ":9090"
 	}
 	if c.Server.ReadTimeout == 0 {
 		c.Server.ReadTimeout = 30 * time.Second

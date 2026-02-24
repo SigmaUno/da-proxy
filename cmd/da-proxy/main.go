@@ -52,6 +52,7 @@ func main() {
 		zap.String("version", version),
 		zap.String("config", cfgPath),
 		zap.String("proxy_listen", cfg.Server.Listen),
+		zap.String("grpc_listen", cfg.Server.GRPCListen),
 		zap.String("admin_listen", cfg.Admin.Listen),
 		zap.String("metrics_listen", cfg.Metrics.Listen),
 	)
@@ -202,17 +203,10 @@ func main() {
 	)
 	proxyServer.Use(middlewares...)
 
-	// Protocol routing: WebSocket, gRPC, or HTTP proxy.
+	// Protocol routing: WebSocket or HTTP proxy (gRPC served on dedicated port).
 	proxyServer.Any("/*", func(c echo.Context) error {
-		// WebSocket upgrade.
 		if proxy.IsWebSocketUpgrade(c.Request()) {
 			return wsProxy.Handle(c)
-		}
-		// gRPC.
-		ct := c.Request().Header.Get("Content-Type")
-		if len(ct) >= 16 && ct[:16] == "application/grpc" {
-			grpcProxy.Handler().ServeHTTP(c.Response(), c.Request())
-			return nil
 		}
 		return proxyHandler.HandleRequest(c)
 	})
@@ -254,6 +248,18 @@ func main() {
 		}
 	}()
 
+	// gRPC server (unauthenticated transparent proxy on dedicated port).
+	grpcServer := &http.Server{
+		Addr:    cfg.Server.GRPCListen,
+		Handler: grpcProxy.Handler(),
+	}
+	go func() {
+		logger.Info("gRPC server starting", zap.String("addr", cfg.Server.GRPCListen))
+		if srvErr := grpcServer.ListenAndServe(); srvErr != nil && srvErr != http.ErrServerClosed {
+			logger.Fatal("gRPC server failed", zap.Error(srvErr))
+		}
+	}()
+
 	// Admin server.
 	go func() {
 		if err := adminServer.Start(); err != nil && err != http.ErrServerClosed {
@@ -284,6 +290,9 @@ func main() {
 
 	if err := proxyServer.Shutdown(shutdownCtx); err != nil {
 		logger.Error("proxy server shutdown error", zap.Error(err))
+	}
+	if err := grpcServer.Shutdown(shutdownCtx); err != nil {
+		logger.Error("gRPC server shutdown error", zap.Error(err))
 	}
 	if err := adminServer.Shutdown(shutdownCtx); err != nil {
 		logger.Error("admin server shutdown error", zap.Error(err))
