@@ -22,7 +22,7 @@ RUN apk add --no-cache ca-certificates sqlite-libs && \
 COPY --from=builder /build/da-proxy /usr/local/bin/da-proxy
 COPY configs/config.example.yaml /etc/da-proxy/config.yaml
 
-EXPOSE 443 8080 9191
+EXPOSE 443 8080 9090 9191 26656
 
 ENTRYPOINT ["da-proxy"]
 CMD ["-config", "/etc/da-proxy/config.yaml"]

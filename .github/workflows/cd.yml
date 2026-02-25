@@ -2,6 +2,7 @@ name: CD
 
 on:
   push:
+    branches: [main]
     tags: ["v*"]
 
 permissions:
@@ -31,9 +32,10 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository }}
           tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,enable={{is_default_branch}}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=sha
 
       - name: Build and push
         uses: docker/build-push-action@v6
