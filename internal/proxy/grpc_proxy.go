@@ -15,8 +15,14 @@ import (
 	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
+	"github.com/SigmaUno/da-proxy/internal/logging"
 	"github.com/SigmaUno/da-proxy/internal/metrics"
 )
+
+// LogSink receives log entries for storage (ring buffer, database, etc.).
+type LogSink interface {
+	Push(entry logging.LogEntry)
+}
 
 // rawCodec is a gRPC codec that passes through raw bytes without
 // marshaling/unmarshaling via protobuf. This enables transparent proxying
@@ -54,14 +60,16 @@ type GRPCProxy struct {
 	router  Router
 	logger  *zap.Logger
 	metrics *metrics.Metrics
+	sinks   []LogSink
 }
 
 // NewGRPCProxy creates a new transparent gRPC reverse proxy.
-func NewGRPCProxy(router Router, logger *zap.Logger, m *metrics.Metrics) *GRPCProxy {
+func NewGRPCProxy(router Router, logger *zap.Logger, m *metrics.Metrics, sinks ...LogSink) *GRPCProxy {
 	p := &GRPCProxy{
 		router:  router,
 		logger:  logger,
 		metrics: m,
+		sinks:   sinks,
 	}
 	p.server = grpc.NewServer(
 		grpc.UnknownServiceHandler(p.streamHandler),
@@ -213,13 +221,38 @@ func (p *GRPCProxy) streamHandler(_ interface{}, serverStream grpc.ServerStream)
 		}
 	}
 
+	latency := time.Since(start)
+	latencyMs := float64(latency.Nanoseconds()) / 1e6
+
 	p.logger.Info("grpc_request_complete",
 		zap.String("method", fullMethod),
 		zap.String("backend", endpoint),
 		zap.String("grpc_code", grpcCode.String()),
-		zap.Duration("latency", time.Since(start)),
+		zap.Duration("latency", latency),
 		zap.String("client_ip", clientIP),
 	)
+
+	// Push to log sinks (ring buffer, database) so gRPC requests
+	// appear in the admin logs endpoint.
+	var errMsg string
+	if retErr != nil {
+		errMsg = retErr.Error()
+	}
+	entry := logging.LogEntry{
+		Timestamp:  start,
+		Method:     fullMethod,
+		Backend:    string(BackendCelestiaAppGRPC),
+		StatusCode: int(grpcCode),
+		LatencyMs:  latencyMs,
+		ClientIP:   clientIP,
+		Error:      errMsg,
+		Path:       "grpc",
+	}
+	for _, sink := range p.sinks {
+		if sink != nil {
+			sink.Push(entry)
+		}
+	}
 
 	return retErr
 }

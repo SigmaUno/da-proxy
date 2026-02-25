@@ -185,7 +185,7 @@ func main() {
 	// --- gRPC proxy (optional) ---
 	var grpcProxy *proxy.GRPCProxy
 	if len(cfg.Backends.CelestiaAppGRPC) > 0 {
-		grpcProxy = proxy.NewGRPCProxy(router, logger, promMetrics)
+		grpcProxy = proxy.NewGRPCProxy(router, logger, promMetrics, ringBuffer, logStore)
 		logger.Info("gRPC proxy configured",
 			zap.String("grpc_listen", cfg.Server.GRPCListen),
 			zap.Int("backends", len(cfg.Backends.CelestiaAppGRPC)),
