@@ -10,7 +10,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/encoding"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
@@ -39,11 +38,7 @@ func (rawCodec) Unmarshal(data []byte, v interface{}) error {
 	return nil
 }
 
-func (rawCodec) Name() string { return "proto" }
-
-func init() {
-	encoding.RegisterCodec(rawCodec{})
-}
+func (rawCodec) Name() string { return "raw" }
 
 // frame holds a raw gRPC message payload for transparent forwarding.
 type frame struct {
@@ -194,14 +189,6 @@ func (p *GRPCProxy) forwardClientToBackend(src grpc.ServerStream, dst grpc.Clien
 
 // forwardBackendToClient reads frames from the backend and sends them to the client.
 func (p *GRPCProxy) forwardBackendToClient(src grpc.ClientStream, dst grpc.ServerStream) error {
-	// Forward response headers.
-	headerMD, err := src.Header()
-	if err == nil && headerMD != nil {
-		if sendErr := dst.SendHeader(headerMD); sendErr != nil {
-			return sendErr
-		}
-	}
-
 	for {
 		f := &frame{}
 		if err := src.RecvMsg(f); err != nil {
