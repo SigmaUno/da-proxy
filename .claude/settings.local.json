@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(*)",
+      "Bash(go version:*)",
+      "Bash(golangci-lint:*)",
+      "Bash(gotestsum:*)",
+      "Bash(git -C /Users/sysrex/src/da-proxy config --local --list)",
+      "Bash(git -C /Users/sysrex/src/da-proxy branch:*)",
+      "Bash(git -C /Users/sysrex/src/da-proxy remote:*)",
+      "Bash(gh issue list:*)",
+      "Bash(gh issue view:*)",
+      "Bash(go mod init:*)",
+      "Bash(go build:*)",
+      "Bash(make build:*)",
+      "Bash(go get:*)",
+      "Bash(go mod tidy:*)",
+      "Bash(CGO_ENABLED=1 go test:*)",
+      "Bash(make test:*)",
+      "Bash(make lint:*)",
+      "Bash(gofmt:*)",
+      "Bash(go test:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(curl:*)",
+      "Bash(python3:*)",
+      "Bash(make test-integration:*)",
+      "Bash(gh issue close:*)",
+      "Bash(grep:*)"
+    ]
+  }
+}
