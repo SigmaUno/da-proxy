@@ -90,6 +90,14 @@ func (h *Handler) HandleRequest(c echo.Context) error {
 	c.Set(middleware.ContextKeyBackend, string(decision.Backend))
 	c.Set(middleware.ContextKeyRPCMethod, decision.Method)
 
+	h.logger.Info("rpc_request",
+		zap.String("method", decision.Method),
+		zap.String("backend", string(decision.Backend)),
+		zap.String("target", decision.TargetURL),
+		zap.String("path", path),
+		zap.String("client_ip", c.RealIP()),
+	)
+
 	// Check method authorization against token scope and allowlist.
 	if decision.Method != "" {
 		if infoVal := c.Get(middleware.ContextKeyTokenInfo); infoVal != nil {

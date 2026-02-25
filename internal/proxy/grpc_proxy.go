@@ -93,7 +93,7 @@ func (p *GRPCProxy) streamHandler(_ interface{}, serverStream grpc.ServerStream)
 		return status.Error(codes.Unavailable, "no gRPC backend available")
 	}
 
-	p.logger.Debug("gRPC proxy request",
+	p.logger.Info("grpc_request",
 		zap.String("method", fullMethod),
 		zap.String("backend", endpoint),
 	)
@@ -160,9 +160,19 @@ func (p *GRPCProxy) streamHandler(_ interface{}, serverStream grpc.ServerStream)
 	// Forward backend trailers to client.
 	serverStream.SetTrailer(clientStream.Trailer())
 
-	p.logger.Debug("gRPC proxy completed",
+	grpcCode := codes.OK
+	if retErr != nil {
+		if s, ok := status.FromError(retErr); ok {
+			grpcCode = s.Code()
+		} else {
+			grpcCode = codes.Unknown
+		}
+	}
+
+	p.logger.Info("grpc_request_complete",
 		zap.String("method", fullMethod),
 		zap.String("backend", endpoint),
+		zap.String("grpc_code", grpcCode.String()),
 		zap.Duration("latency", time.Since(start)),
 	)
 
