@@ -1,20 +1,21 @@
 services:
   da-proxy:
+    image: ghcr.io/sigmauno/da-proxy:${DA_PROXY_VERSION:-latest}
     build:
       context: .
       args:
         VERSION: ${VERSION:-dev}
     ports:
-      - "443:443"
-      - "8080:8080"
-      - "9191:9191"
+      - "443:443"       # HTTPS / JSON-RPC proxy
+      - "8080:8080"     # Admin API
+      - "9090:9090"     # gRPC proxy
+      - "9191:9191"     # Prometheus metrics
+      - "26656:26656"   # TCP/P2P proxy
     volumes:
       - ./configs:/etc/da-proxy:ro
       - proxy-data:/data
     depends_on:
-      celestia-app:
-        condition: service_healthy
-      celestia-node:
+      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:9191/metrics"]
@@ -23,36 +24,19 @@ services:
       retries: 3
     restart: unless-stopped
 
-  celestia-app:
-    image: ghcr.io/celestiaorg/celestia-app:latest
+  redis:
+    image: redis:7-alpine
     ports:
-      - "26657:26657"
-      - "9090:9090"
-      - "1317:1317"
+      - "6379:6379"
     volumes:
-      - celestia-app-data:/home/celestia
+      - redis-data:/data
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:26657/health"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
-      retries: 5
-
-  celestia-node:
-    image: ghcr.io/celestiaorg/celestia-node:latest
-    ports:
-      - "26658:26658"
-    volumes:
-      - celestia-node-data:/home/celestia
-    depends_on:
-      celestia-app:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:26658"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      retries: 3
+    restart: unless-stopped
 
 volumes:
   proxy-data:
-  celestia-app-data:
-  celestia-node-data:
+  redis-data:

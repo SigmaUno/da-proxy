@@ -40,6 +40,12 @@ tokens:
     rate_limit: 0
     allowed_methods: []
 
+cache:
+  enabled: true
+  redis_url: "redis://redis:6379/0"
+  ttl: 336h              # 14 days
+  max_entry_size: "5MB"
+
 admin:
   listen: ":8080"
   username: "admin"

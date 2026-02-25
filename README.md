@@ -233,13 +233,55 @@ make run
 
 ### Docker
 
-```bash
-# Build the Docker image
-make docker-build
+Pre-built images are published to GitHub Container Registry on every push to `main` and on version tags.
 
-# Run with Docker Compose (includes Celestia nodes)
-docker compose up -d
+```bash
+# Pull the latest image
+docker pull ghcr.io/sigmauno/da-proxy:latest
+
+# Or a specific version
+docker pull ghcr.io/sigmauno/da-proxy:0.1.0
 ```
+
+### Docker Compose
+
+The included `docker-compose.yaml` runs DA-Proxy. Configure your Celestia backend endpoints in `configs/config.yaml`.
+
+```bash
+# 1. Copy and edit the config
+cp configs/config.example.yaml configs/config.yaml
+
+# 2. Start the full stack (pulls the pre-built image)
+docker compose up -d
+
+# 3. Build from source instead of pulling (optional)
+docker compose up -d --build
+
+# 4. Check status
+docker compose ps
+
+# 5. View logs
+docker compose logs -f da-proxy
+
+# 6. Stop everything
+docker compose down
+```
+
+To run a specific version, set the `DA_PROXY_VERSION` environment variable:
+
+```bash
+DA_PROXY_VERSION=0.1.0 docker compose up -d
+```
+
+The compose file exposes these ports by default:
+
+| Port | Service |
+|------|---------|
+| 443 | HTTPS / JSON-RPC proxy |
+| 8080 | Admin API |
+| 9090 | gRPC proxy |
+| 9191 | Prometheus metrics |
+| 26656 | TCP/P2P proxy |
 
 ## Usage
 
