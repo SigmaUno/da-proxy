@@ -1,4 +1,6 @@
 # DA-Proxy
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FSigmaUno%2Fda-proxy.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FSigmaUno%2Fda-proxy?ref=badge_shield)
+
 
 A unified HTTPS reverse proxy gateway for Celestia infrastructure. DA-Proxy exposes a single authenticated endpoint that intelligently routes incoming requests to the appropriate Celestia backend service based on the RPC method being called.
 
@@ -367,3 +369,6 @@ make fmt
 ## License
 
 See [LICENSE](LICENSE) for details.
+
+
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FSigmaUno%2Fda-proxy.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2FSigmaUno%2Fda-proxy?ref=badge_large)
