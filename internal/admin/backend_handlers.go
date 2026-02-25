@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -13,15 +14,25 @@ import (
 	"github.com/SigmaUno/da-proxy/internal/proxy"
 )
 
-// backendInfo is the JSON response structure for a single backend.
-type backendInfo struct {
-	Name            string   `json:"name"`
-	Endpoints       []string `json:"endpoints"`
+// endpointInfo is the per-endpoint breakdown in the backends response.
+type endpointInfo struct {
+	URL             string   `json:"url"`
+	EWMALatencyMs   float64  `json:"ewma_latency_ms"`
+	RequestCount    uint64   `json:"request_count"`
 	Healthy         *bool    `json:"healthy,omitempty"`
 	HealthLatencyMs *float64 `json:"health_latency_ms,omitempty"`
-	AvgLatencyMs    float64  `json:"avg_latency_ms"`
-	TotalRequests   int64    `json:"total_requests"`
-	Methods         []string `json:"methods"`
+}
+
+// backendInfo is the JSON response structure for a single backend.
+type backendInfo struct {
+	Name            string         `json:"name"`
+	Endpoints       []string       `json:"endpoints"`
+	EndpointStats   []endpointInfo `json:"endpoint_stats"`
+	Healthy         *bool          `json:"healthy,omitempty"`
+	HealthLatencyMs *float64       `json:"health_latency_ms,omitempty"`
+	AvgLatencyMs    float64        `json:"avg_latency_ms"`
+	TotalRequests   int64          `json:"total_requests"`
+	Methods         []string       `json:"methods"`
 }
 
 func (h *handlers) handleBackends(c echo.Context) error {
@@ -51,6 +62,7 @@ func (h *handlers) handleBackends(c echo.Context) error {
 			{"celestia-node-rpc", b.CelestiaNodeRPC},
 			{"celestia-node-archival-rpc", b.CelestiaNodeArchivalRPC},
 			{"celestia-app-archival-rpc", b.CelestiaAppArchivalRPC},
+			{"celestia-app-grpc", b.CelestiaAppGRPC},
 		}
 	}
 
@@ -85,9 +97,39 @@ func (h *handlers) handleBackends(c echo.Context) error {
 			Methods:   []string{},
 		}
 
-		// Merge health status. Health checker keys use the same base name
-		// but with /0, /1 suffixes for multi-endpoint backends.
-		// Aggregate: healthy = all endpoints healthy.
+		// Build per-endpoint stats from the router's EWMA tracker.
+		var epStats []proxy.EndpointStats
+		if h.deps.Router != nil {
+			epStats = h.deps.Router.EndpointStats(proxy.Backend(def.name))
+		}
+
+		epInfos := make([]endpointInfo, len(def.endpoints))
+		for i, epURL := range def.endpoints {
+			epInfos[i] = endpointInfo{URL: epURL}
+
+			// Merge EWMA latency stats.
+			for _, es := range epStats {
+				if es.URL == epURL {
+					epInfos[i].EWMALatencyMs = es.EWMALatencyMs
+					epInfos[i].RequestCount = es.RequestCount
+					break
+				}
+			}
+
+			// Merge per-endpoint health status.
+			if healthMap != nil {
+				healthKey := endpointHealthKey(def.name, i, len(def.endpoints))
+				if hs, ok := healthMap[healthKey]; ok {
+					healthy := hs.Healthy
+					epInfos[i].Healthy = &healthy
+					lat := hs.LatencyMs
+					epInfos[i].HealthLatencyMs = &lat
+				}
+			}
+		}
+		info.EndpointStats = epInfos
+
+		// Merge aggregate health status across all endpoints.
 		if healthMap != nil {
 			allHealthy := true
 			var totalLatency float64
@@ -133,4 +175,12 @@ func (h *handlers) handleBackends(c echo.Context) error {
 	return c.JSON(http.StatusOK, map[string]interface{}{
 		"backends": backends,
 	})
+}
+
+// endpointHealthKey returns the health checker map key for a specific endpoint.
+func endpointHealthKey(baseName string, idx, total int) string {
+	if total <= 1 {
+		return baseName
+	}
+	return fmt.Sprintf("%s/%d", baseName, idx)
 }

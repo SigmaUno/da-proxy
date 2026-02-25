@@ -5,11 +5,13 @@ A unified HTTPS reverse proxy gateway for Celestia infrastructure. DA-Proxy expo
 ## Features
 
 - **Unified endpoint** with method-based routing to celestia-app (consensus) and celestia-node (DA)
+- **gRPC reverse proxy** on a dedicated port (`:9090`) — transparent proxying of all gRPC services without authentication
+- **Latency-aware load balancing** — EWMA-based routing to the fastest backend endpoint with 10% exploration to prevent starvation
 - **URL path token authentication** (QuickNode-style: `/<token>/...`)
 - **Per-token rate limiting** with configurable requests-per-minute
 - **Structured logging** via Uber Zap (JSON to stdout)
 - **Prometheus metrics** on a dedicated port (`:9191`)
-- **Admin REST API** with Basic Auth for request logs, health, and metrics summaries
+- **Admin REST API** with Basic Auth for request logs, health, per-endpoint latency stats, and metrics summaries
 - **Request log storage** via in-memory ring buffer and SQLite
 - **Backend health checks** with automatic monitoring
 - **Graceful shutdown** with in-flight request draining
@@ -17,21 +19,31 @@ A unified HTTPS reverse proxy gateway for Celestia infrastructure. DA-Proxy expo
 ## Architecture
 
 ```
-                    ┌───────────────────────────────────────┐
-                    │            DA-Proxy (Go)               │
-                    │                                         │
-  HTTPS :443        │  ┌──────────┐    ┌───────────────┐     │
-─────────────────►  │  │   Auth   │───►│ Method Router  │     │
- (URL path token)   │  │Middleware│    │                │     │
-                    │  └──────────┘    └──────┬────────┘     │
-                    │                    │              │     │
-                    │           ┌────────┘              │     │
-                    │           ▼                       ▼     │
-                    │  ┌────────────┐          ┌──────────┐  │
-                    │  │celestia-app│          │celestia-  │  │
-                    │  │ RPC :26657 │          │node :26658│  │
-                    │  └────────────┘          └──────────┘  │
-                    └───────────────────────────────────────┘
+                    ┌─────────────────────────────────────────┐
+                    │             DA-Proxy (Go)                │
+                    │                                           │
+  HTTPS :443        │  ┌──────────┐    ┌───────────────┐       │
+─────────────────►  │  │   Auth   │───►│ Method Router  │       │
+ (URL path token)   │  │Middleware│    │                │       │
+                    │  └──────────┘    └──────┬────────┘       │
+                    │                    │              │       │
+                    │           ┌────────┘              │       │
+                    │           ▼                       ▼       │
+                    │  ┌────────────┐          ┌──────────┐    │
+                    │  │celestia-app│          │celestia-  │    │
+                    │  │ RPC :26657 │          │node :26658│    │
+                    │  └────────────┘          └──────────┘    │
+                    │                                           │
+  gRPC :9090        │  ┌───────────────────────────────┐       │
+─────────────────►  │  │  Transparent gRPC Proxy       │       │
+ (no auth)          │  │  (UnknownServiceHandler)      │       │
+                    │  └──────────────┬────────────────┘       │
+                    │                 ▼                         │
+                    │        ┌────────────────┐                │
+                    │        │ celestia-app   │                │
+                    │        │  gRPC :9090    │                │
+                    │        └────────────────┘                │
+                    └─────────────────────────────────────────┘
 ```
 
 ## Routing Rules
@@ -42,6 +54,14 @@ A unified HTTPS reverse proxy gateway for Celestia infrastructure. DA-Proxy expo
 |-----------|---------|
 | Method prefix in `blob`, `header`, `share`, `das`, `state`, `p2p`, `node` | celestia-node:26658 |
 | Everything else | celestia-app:26657 (Tendermint RPC) |
+
+**gRPC proxy (`:9090`, no authentication):**
+
+| Condition | Backend |
+|-----------|---------|
+| All gRPC services/methods | celestia-app gRPC backends |
+
+The gRPC proxy transparently forwards all gRPC calls without requiring proto definitions. It supports unary, client-streaming, server-streaming, and bidirectional RPCs.
 
 ## Quick Start
 
@@ -81,6 +101,7 @@ Key configuration sections:
 ```yaml
 server:
   listen: ":443"              # Proxy listen address
+  grpc_listen: ":9090"        # gRPC proxy listen address
   tls_cert: ""                # Path to TLS cert (empty = no TLS)
   tls_key: ""                 # Path to TLS key
   read_timeout: 30s
@@ -90,6 +111,7 @@ server:
 backends:
   celestia_app_rpc: "http://127.0.0.1:26657"
   celestia_node_rpc: "http://127.0.0.1:26658"
+  # celestia_app_grpc: "127.0.0.1:9090"  # Optional: enables gRPC proxy
   health_check_interval: 30s
 
 tokens:
@@ -138,6 +160,11 @@ backends:
     - "http://da-archive-1:26658"
     - "http://da-archive-2:26658"
 
+  # gRPC backends (optional, enables gRPC proxy on grpc_listen port)
+  celestia_app_grpc:
+    - "app-node-1:9090"
+    - "app-node-2:9090"
+
   # Requests for heights older than (head - pruning_window) go to archival nodes.
   pruning_window: 100000
 
@@ -150,6 +177,7 @@ A single URL still works (no list needed):
 backends:
   celestia_app_rpc: "http://127.0.0.1:26657"
   celestia_node_rpc: "http://127.0.0.1:26658"
+  celestia_app_grpc: "127.0.0.1:9090"
 ```
 
 Generate a bcrypt password hash:
@@ -207,7 +235,7 @@ The admin API is served on a separate port (default `:8080`) with HTTP Basic Aut
 |----------|-------------|
 | `GET /admin/api/health` | Backend health status |
 | `GET /admin/api/status` | Proxy uptime, version, token count |
-| `GET /admin/api/backends` | Configured backends with avg latency and used methods |
+| `GET /admin/api/backends` | Configured backends with per-endpoint EWMA latency, request counts, and health |
 | `GET /admin/api/logs` | Query request logs with filtering |
 | `GET /admin/api/logs/stream` | SSE stream of real-time logs |
 | `GET /admin/api/logs/export` | Export logs as JSON or CSV |
@@ -233,8 +261,10 @@ Metrics are served at `http://localhost:9191/metrics`:
 
 | Metric | Type | Description |
 |--------|------|-------------|
-| `daproxy_requests_total` | Counter | Total proxied requests |
-| `daproxy_request_duration_seconds` | Histogram | Request latency |
+| `daproxy_requests_total` | Counter | Total proxied HTTP requests |
+| `daproxy_request_duration_seconds` | Histogram | HTTP request latency |
+| `daproxy_grpc_requests_total` | Counter | Total proxied gRPC requests |
+| `daproxy_grpc_request_duration_seconds` | Histogram | gRPC request latency |
 | `daproxy_errors_total` | Counter | Errors by type |
 | `daproxy_backend_up` | Gauge | Backend health (1/0) |
 | `daproxy_rate_limit_hits_total` | Counter | Rate limit triggers |
@@ -285,7 +315,8 @@ make fmt
 
 - Tokens should be generated with at least 160 bits of entropy (`crypto/rand`), hex-encoded (40 characters)
 - The admin API should be firewalled to internal/VPN access only
-- Backend ports (26657, 26658) should not be publicly accessible
+- The gRPC proxy (`:9090`) has no authentication — restrict access via firewall rules or bind to an internal interface
+- Backend ports (26657, 26658, 9090) should not be publicly accessible
 - Token values are never logged or forwarded to backends
 - TLS termination can be done at the proxy or an upstream load balancer
 

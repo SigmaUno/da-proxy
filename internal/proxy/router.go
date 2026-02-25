@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/SigmaUno/da-proxy/internal/config"
 )
@@ -17,6 +18,7 @@ const (
 	BackendCelestiaNodeRPC         Backend = "celestia-node-rpc"
 	BackendCelestiaNodeArchivalRPC Backend = "celestia-node-archival-rpc"
 	BackendCelestiaAppArchivalRPC  Backend = "celestia-app-archival-rpc"
+	BackendCelestiaAppGRPC         Backend = "celestia-app-grpc"
 )
 
 // daNamespaces are JSON-RPC method prefixes routed to celestia-node.
@@ -45,6 +47,8 @@ type Router interface {
 	GetHeightTracker() *HeightTracker
 	ArchivalBackendFor(backend Backend) Backend
 	HasArchivalBackend(backend Backend) bool
+	RecordLatency(backend Backend, endpoint string, d time.Duration)
+	EndpointStats(backend Backend) []EndpointStats
 }
 
 type router struct {
@@ -72,11 +76,12 @@ func NewRouterWithTracker(backends config.BackendsConfig, ht *HeightTracker) Rou
 }
 
 func buildBalancers(b config.BackendsConfig) map[Backend]*Balancer {
-	m := make(map[Backend]*Balancer, 4)
+	m := make(map[Backend]*Balancer, 5)
 	m[BackendCelestiaAppRPC] = NewBalancer(b.CelestiaAppRPC)
 	m[BackendCelestiaNodeRPC] = NewBalancer(b.CelestiaNodeRPC)
 	m[BackendCelestiaNodeArchivalRPC] = NewBalancer(b.CelestiaNodeArchivalRPC)
 	m[BackendCelestiaAppArchivalRPC] = NewBalancer(b.CelestiaAppArchivalRPC)
+	m[BackendCelestiaAppGRPC] = NewBalancer(b.CelestiaAppGRPC)
 	return m
 }
 
@@ -183,6 +188,21 @@ func (r *router) archivalBackend(pruned Backend) Backend {
 	default:
 		return pruned
 	}
+}
+
+// RecordLatency updates the EWMA for the given endpoint in the specified backend.
+func (r *router) RecordLatency(backend Backend, endpoint string, d time.Duration) {
+	if bal, ok := r.balancers[backend]; ok {
+		bal.RecordLatency(endpoint, d)
+	}
+}
+
+// EndpointStats returns per-endpoint latency statistics for the given backend.
+func (r *router) EndpointStats(backend Backend) []EndpointStats {
+	if bal, ok := r.balancers[backend]; ok {
+		return bal.Stats()
+	}
+	return nil
 }
 
 // extractNamespace returns the namespace prefix before the first dot.

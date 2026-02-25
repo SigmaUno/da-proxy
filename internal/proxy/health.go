@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -135,6 +137,15 @@ func (h *healthChecker) checkAll() {
 		})
 	}
 
+	// gRPC backends.
+	for i, ep := range h.backends.CelestiaAppGRPC {
+		endpoint := ep
+		checks = append(checks, healthCheck{
+			h.endpointName("celestia-app-grpc", i, len(h.backends.CelestiaAppGRPC)),
+			func() HealthStatus { return h.checkTCPDial(endpoint) },
+		})
+	}
+
 	for _, check := range checks {
 		status := check.fn()
 		status.Backend = check.name
@@ -243,5 +254,21 @@ func (h *healthChecker) checkJSONRPC(baseURL string) HealthStatus {
 		return HealthStatus{LatencyMs: latency, Error: "JSON-RPC error"}
 	}
 
+	return HealthStatus{Healthy: true, LatencyMs: latency}
+}
+
+func (h *healthChecker) checkTCPDial(addr string) HealthStatus {
+	// Strip scheme if present (gRPC endpoints are typically host:port).
+	addr = strings.TrimPrefix(addr, "http://")
+	addr = strings.TrimPrefix(addr, "https://")
+
+	start := time.Now()
+	conn, err := net.DialTimeout("tcp", addr, 5*time.Second)
+	latency := float64(time.Since(start).Nanoseconds()) / 1e6
+
+	if err != nil {
+		return HealthStatus{LatencyMs: latency, Error: err.Error()}
+	}
+	_ = conn.Close()
 	return HealthStatus{Healthy: true, LatencyMs: latency}
 }

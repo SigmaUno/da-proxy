@@ -8,6 +8,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v4"
 	"go.uber.org/zap"
@@ -159,7 +160,11 @@ func (h *Handler) HandleRequest(c echo.Context) error {
 // proxyDirect sends the request to a single backend with no fallback.
 func (h *Handler) proxyDirect(c echo.Context, req *http.Request, decision RouteDecision, targetURL *url.URL, path, rawQuery string, body []byte, height int64, shouldCache bool) error {
 	proxy := h.buildProxy(c, req, decision, targetURL, path, rawQuery, body, height, shouldCache)
+
+	start := time.Now()
 	proxy.ServeHTTP(c.Response(), req)
+	h.router.RecordLatency(decision.Backend, decision.TargetURL, time.Since(start))
+
 	return nil
 }
 
@@ -168,7 +173,7 @@ func (h *Handler) proxyDirect(c echo.Context, req *http.Request, decision RouteD
 // against the archival backend if configured.
 func (h *Handler) proxyWithRetry(c echo.Context, req *http.Request, decision RouteDecision, targetURL *url.URL, path, rawQuery string, body []byte, height int64, shouldCache bool) error {
 	// Try the initially-selected endpoint.
-	buf := h.tryEndpoint(req, targetURL, path, rawQuery, body, decision.Backend)
+	buf := h.tryEndpoint(req, targetURL, path, rawQuery, body, decision.Backend, decision.TargetURL)
 	if !isPrunedError(buf.statusCode, buf.body.Bytes()) {
 		return h.flushBuffered(c, buf, decision.Backend, decision.Method, height, body, shouldCache)
 	}
@@ -192,7 +197,7 @@ func (h *Handler) proxyWithRetry(c echo.Context, req *http.Request, decision Rou
 		if body != nil {
 			req.Body = io.NopCloser(bytes.NewReader(body))
 		}
-		buf = h.tryEndpoint(req, altTarget, path, rawQuery, body, decision.Backend)
+		buf = h.tryEndpoint(req, altTarget, path, rawQuery, body, decision.Backend, ep)
 		if !isPrunedError(buf.statusCode, buf.body.Bytes()) {
 			return h.flushBuffered(c, buf, decision.Backend, decision.Method, height, body, shouldCache)
 		}
@@ -218,7 +223,7 @@ func (h *Handler) proxyWithRetry(c echo.Context, req *http.Request, decision Rou
 			if body != nil {
 				req.Body = io.NopCloser(bytes.NewReader(body))
 			}
-			buf = h.tryEndpoint(req, archivalTarget, path, rawQuery, body, archivalBackend)
+			buf = h.tryEndpoint(req, archivalTarget, path, rawQuery, body, archivalBackend, ep)
 			if !isPrunedError(buf.statusCode, buf.body.Bytes()) {
 				c.Set(middleware.ContextKeyBackend, string(archivalBackend))
 				return h.flushBuffered(c, buf, archivalBackend, decision.Method, height, body, shouldCache)
@@ -231,10 +236,15 @@ func (h *Handler) proxyWithRetry(c echo.Context, req *http.Request, decision Rou
 }
 
 // tryEndpoint proxies to a single endpoint and returns the buffered response.
-func (h *Handler) tryEndpoint(req *http.Request, targetURL *url.URL, path, rawQuery string, body []byte, backend Backend) *bufferedResponseWriter {
+// endpointURL is the raw config string used to record latency (avoids URL normalization mismatches).
+func (h *Handler) tryEndpoint(req *http.Request, targetURL *url.URL, path, rawQuery string, body []byte, backend Backend, endpointURL string) *bufferedResponseWriter {
 	buf := newBufferedResponseWriter()
 	proxy := h.buildRawProxy(targetURL, path, rawQuery, body, backend)
+
+	start := time.Now()
 	proxy.ServeHTTP(buf, req)
+	h.router.RecordLatency(backend, endpointURL, time.Since(start))
+
 	return buf
 }
 

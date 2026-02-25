@@ -17,6 +17,7 @@ type Dependencies struct {
 	LogBuffer     *logging.RingBuffer
 	LogStore      logging.Store
 	HealthChecker proxy.HealthChecker
+	Router        proxy.Router
 	TokenStore    *auth.SQLiteTokenStore
 	Config        *config.Config
 	Logger        *zap.Logger

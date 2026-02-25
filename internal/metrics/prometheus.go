@@ -15,6 +15,8 @@ type Metrics struct {
 	BackendHealthDuration *prometheus.GaugeVec
 	RateLimitRemaining    *prometheus.GaugeVec
 	RateLimitHitsTotal    *prometheus.CounterVec
+	GRPCRequestsTotal     *prometheus.CounterVec
+	GRPCRequestDuration   *prometheus.HistogramVec
 }
 
 // NewMetrics creates and registers all Prometheus metrics with the given registerer.
@@ -72,6 +74,17 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "daproxy_rate_limit_hits_total",
 			Help: "Total times rate limit was triggered.",
 		}, []string{"token_name"}),
+
+		GRPCRequestsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "daproxy_grpc_requests_total",
+			Help: "Total number of proxied gRPC requests.",
+		}, []string{"method", "grpc_code"}),
+
+		GRPCRequestDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "daproxy_grpc_request_duration_seconds",
+			Help:    "gRPC request latency distribution in seconds.",
+			Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0},
+		}, []string{"method"}),
 	}
 
 	reg.MustRegister(
@@ -85,6 +98,8 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.BackendHealthDuration,
 		m.RateLimitRemaining,
 		m.RateLimitHitsTotal,
+		m.GRPCRequestsTotal,
+		m.GRPCRequestDuration,
 	)
 
 	return m

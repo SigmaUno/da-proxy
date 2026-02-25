@@ -5,6 +5,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -52,6 +53,7 @@ func main() {
 		zap.String("version", version),
 		zap.String("config", cfgPath),
 		zap.String("proxy_listen", cfg.Server.Listen),
+		zap.String("grpc_listen", cfg.Server.GRPCListen),
 		zap.String("admin_listen", cfg.Admin.Listen),
 		zap.String("metrics_listen", cfg.Metrics.Listen),
 	)
@@ -180,6 +182,16 @@ func main() {
 		router.GetHeightTracker(),
 	)
 
+	// --- gRPC proxy (optional) ---
+	var grpcProxy *proxy.GRPCProxy
+	if len(cfg.Backends.CelestiaAppGRPC) > 0 {
+		grpcProxy = proxy.NewGRPCProxy(router, logger, promMetrics)
+		logger.Info("gRPC proxy configured",
+			zap.String("grpc_listen", cfg.Server.GRPCListen),
+			zap.Int("backends", len(cfg.Backends.CelestiaAppGRPC)),
+		)
+	}
+
 	// --- Proxy server ---
 	proxyServer := echo.New()
 	proxyServer.HideBanner = true
@@ -212,6 +224,7 @@ func main() {
 		LogBuffer:     ringBuffer,
 		LogStore:      logStore,
 		HealthChecker: healthChecker,
+		Router:        router,
 		TokenStore:    tokenStore,
 		Config:        cfg,
 		Logger:        logger,
@@ -260,6 +273,20 @@ func main() {
 		}()
 	}
 
+	// gRPC proxy server.
+	if grpcProxy != nil {
+		go func() {
+			lis, lisErr := net.Listen("tcp", cfg.Server.GRPCListen)
+			if lisErr != nil {
+				logger.Fatal("gRPC server listen failed", zap.Error(lisErr))
+			}
+			logger.Info("gRPC proxy server starting", zap.String("addr", cfg.Server.GRPCListen))
+			if srvErr := grpcProxy.Serve(lis); srvErr != nil {
+				logger.Fatal("gRPC proxy server failed", zap.Error(srvErr))
+			}
+		}()
+	}
+
 	// --- Graceful shutdown ---
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -271,6 +298,10 @@ func main() {
 	defer shutdownCancel()
 
 	cancel() // Stop health checker.
+
+	if grpcProxy != nil {
+		grpcProxy.GracefulStop()
+	}
 
 	if err := proxyServer.Shutdown(shutdownCtx); err != nil {
 		logger.Error("proxy server shutdown error", zap.Error(err))

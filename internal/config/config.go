@@ -60,6 +60,7 @@ func (c CacheConfig) MaxEntrySizeBytes() (int64, error) {
 // ServerConfig holds proxy server settings.
 type ServerConfig struct {
 	Listen       string        `yaml:"listen"`
+	GRPCListen   string        `yaml:"grpc_listen"`
 	TLSCert      string        `yaml:"tls_cert"`
 	TLSKey       string        `yaml:"tls_key"`
 	ReadTimeout  time.Duration `yaml:"read_timeout"`
@@ -115,6 +116,7 @@ type BackendsConfig struct {
 	CelestiaNodeRPC         Endpoints     `yaml:"celestia_node_rpc"`
 	CelestiaNodeArchivalRPC Endpoints     `yaml:"celestia_node_archival_rpc"`
 	CelestiaAppArchivalRPC  Endpoints     `yaml:"celestia_app_archival_rpc"`
+	CelestiaAppGRPC         Endpoints     `yaml:"celestia_app_grpc"`
 	PruningWindow           int64         `yaml:"pruning_window"`
 	HealthCheckInterval     time.Duration `yaml:"health_check_interval"`
 }
@@ -236,6 +238,9 @@ func applyDefaults(c *Config) {
 	}
 	if c.Server.MaxBodySize == "" {
 		c.Server.MaxBodySize = "10MB"
+	}
+	if c.Server.GRPCListen == "" {
+		c.Server.GRPCListen = ":9090"
 	}
 
 	if len(c.Backends.CelestiaAppRPC) == 0 {
