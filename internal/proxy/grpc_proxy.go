@@ -118,9 +118,7 @@ func (p *GRPCProxy) streamHandler(_ interface{}, serverStream grpc.ServerStream)
 	// Forward incoming metadata.
 	md, _ := metadata.FromIncomingContext(serverStream.Context())
 
-	// Create a cancellable context derived from the server stream's context.
-	// When either forwarding direction finishes (error or EOF from backend),
-	// we cancel this context to unblock the other goroutine's RecvMsg.
+	// Create a cancellable context for the backend stream.
 	ctx, cancel := context.WithCancel(serverStream.Context())
 	defer cancel()
 
@@ -143,39 +141,53 @@ func (p *GRPCProxy) streamHandler(_ interface{}, serverStream grpc.ServerStream)
 		return err
 	}
 
-	// Bidirectional forwarding with cancellation.
-	// When one direction completes, we cancel the context to unblock the other.
-	errc := make(chan error, 2)
+	// Bidirectional forwarding.
+	//
+	// We launch client->backend in a background goroutine and run
+	// backend->client in the foreground. When backend->client finishes
+	// (either EOF or error), we return from the handler immediately.
+	// Returning from the handler causes the gRPC server to close the
+	// server stream, which unblocks src.RecvMsg in forwardClientToBackend.
+	//
+	// This avoids a deadlock where forwardClientToBackend is blocked on
+	// serverStream.RecvMsg (which context.Cancel cannot unblock since
+	// the server stream uses the gRPC server's own context).
 
-	// Client -> Backend.
+	// Client -> Backend (background).
+	c2bDone := make(chan error, 1)
 	go func() {
-		err := p.forwardClientToBackend(serverStream, clientStream)
-		// If client finished sending (EOF), don't cancel — let backend finish responding.
-		// If client errored, cancel to unblock backend->client.
-		if err != nil {
-			cancel()
-		}
-		errc <- err
+		c2bDone <- p.forwardClientToBackend(serverStream, clientStream)
 	}()
 
-	// Backend -> Client.
-	go func() {
-		err := p.forwardBackendToClient(clientStream, serverStream)
-		// Backend finished (EOF or error) — cancel to unblock client->backend RecvMsg.
-		cancel()
-		errc <- err
-	}()
+	// Backend -> Client (foreground).
+	b2cErr := p.forwardBackendToClient(clientStream, serverStream)
 
-	// Wait for both directions to finish.
-	// After cancel(), the blocked goroutine will unblock quickly.
-	var retErr error
-	for i := 0; i < 2; i++ {
-		if err := <-errc; err != nil {
-			// Keep the first meaningful error (ignore context cancelled from our own cancel).
-			if retErr == nil {
-				retErr = err
-			}
-		}
+	// Cancel the backend context so if c2b is blocked on dst.SendMsg
+	// (writing to the backend), it will unblock.
+	cancel()
+
+	// Wait for c2b to finish. It will unblock because either:
+	// 1. It already finished (client sent all messages + EOF).
+	// 2. Our return from this handler will close the server stream,
+	//    causing serverStream.RecvMsg to return an error.
+	// 3. The cancel() above will cause clientStream.SendMsg to fail.
+	//
+	// We use a short timeout as a safety net.
+	var c2bErr error
+	select {
+	case c2bErr = <-c2bDone:
+	case <-time.After(5 * time.Second):
+		// Safety timeout — should not happen in practice.
+		p.logger.Warn("grpc_c2b_timeout",
+			zap.String("method", fullMethod),
+			zap.String("backend", endpoint),
+		)
+	}
+
+	// Determine the return error — prefer the backend error.
+	retErr := b2cErr
+	if retErr == nil {
+		retErr = c2bErr
 	}
 
 	// Record latency and metrics.
