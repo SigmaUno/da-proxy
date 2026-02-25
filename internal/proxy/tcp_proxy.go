@@ -84,7 +84,7 @@ func (p *TCPProxy) handleConn(client net.Conn) {
 		return
 	}
 
-	p.logger.Debug("tcp_connect",
+	p.logger.Info("tcp_connect",
 		zap.String("client_ip", clientIP),
 		zap.String("backend", endpoint),
 	)
