@@ -98,8 +98,10 @@ func (p *GRPCProxy) streamHandler(_ interface{}, serverStream grpc.ServerStream)
 		zap.String("backend", endpoint),
 	)
 
-	// Dial the backend.
-	conn, err := grpc.NewClient(endpoint,
+	// Dial the backend. Use passthrough resolver so gRPC uses the address as-is
+	// without DNS resolution (endpoints are already resolved host:port).
+	target := "passthrough:///" + endpoint
+	conn, err := grpc.NewClient(target,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithDefaultCallOptions(grpc.ForceCodec(rawCodec{})),
 	)
@@ -121,6 +123,11 @@ func (p *GRPCProxy) streamHandler(_ interface{}, serverStream grpc.ServerStream)
 		ServerStreams: true,
 		ClientStreams: true,
 	}
+	p.logger.Info("grpc_opening_stream",
+		zap.String("method", fullMethod),
+		zap.String("target", target),
+	)
+
 	clientStream, err := conn.NewStream(ctx, desc, fullMethod)
 	if err != nil {
 		p.logger.Error("gRPC backend stream failed",
@@ -131,6 +138,11 @@ func (p *GRPCProxy) streamHandler(_ interface{}, serverStream grpc.ServerStream)
 		p.recordMetrics(fullMethod, start, err)
 		return err
 	}
+
+	p.logger.Info("grpc_stream_opened",
+		zap.String("method", fullMethod),
+		zap.String("backend", endpoint),
+	)
 
 	// Bidirectional forwarding.
 	errc := make(chan error, 2)
