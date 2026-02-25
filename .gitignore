@@ -37,3 +37,7 @@ data/
 
 # Build
 dist/
+
+
+# Claude Settings
+.claude/
