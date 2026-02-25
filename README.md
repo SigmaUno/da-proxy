@@ -1,5 +1,11 @@
 # DA-Proxy
 
+[![Build Status](https://github.com/SigmaUno/da-proxy/workflows/CI/badge.svg)](https://github.com/SigmaUno/da-proxy/actions?query=branch%3Amain+workflow%3A%22CI%22)
+[![made_with golang](https://img.shields.io/badge/made_with-golang-blue.svg)](https://golang.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![codecov](https://codecov.io/gh/SigmaUno/da-proxy/branch/main/graph/badge.svg)](https://codecov.io/gh/SigmaUno/da-proxy)
+[![Latest release](https://img.shields.io/github/v/release/SigmaUno/da-proxy.svg)](https://github.com/SigmaUno/da-proxy/releases)
+
 A unified HTTPS reverse proxy gateway for Celestia infrastructure. DA-Proxy exposes a single authenticated endpoint that intelligently routes incoming requests to the appropriate Celestia backend service based on the RPC method being called.
 
 ## Features
