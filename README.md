@@ -1,4 +1,6 @@
 # DA-Proxy
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FSigmaUno%2Fda-proxy.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FSigmaUno%2Fda-proxy?ref=badge_shield)
+
 
 [![Build Status](https://github.com/SigmaUno/da-proxy/workflows/CI/badge.svg)](https://github.com/SigmaUno/da-proxy/actions?query=branch%3Amain+workflow%3A%22CI%22)
 [![made_with golang](https://img.shields.io/badge/made_with-golang-blue.svg)](https://golang.org/)
@@ -373,3 +375,6 @@ make fmt
 ## License
 
 See [LICENSE](LICENSE) for details.
+
+
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FSigmaUno%2Fda-proxy.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2FSigmaUno%2Fda-proxy?ref=badge_large)
