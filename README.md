@@ -9,10 +9,10 @@ A unified HTTPS reverse proxy gateway for Celestia infrastructure. DA-Proxy expo
 - **Latency-aware load balancing** — EWMA-based routing to the fastest backend endpoint with 10% exploration to prevent starvation
 - **URL path token authentication** (QuickNode-style: `/<token>/...`)
 - **Per-token rate limiting** with configurable requests-per-minute
-- **Structured logging** via Uber Zap (JSON to stdout)
+- **Structured logging** via Uber Zap (JSON to stdout) with client IP on every request (HTTP and gRPC)
 - **Prometheus metrics** on a dedicated port (`:9191`)
 - **Admin REST API** with Basic Auth for request logs, health, per-endpoint latency stats, and metrics summaries
-- **Request log storage** via in-memory ring buffer and SQLite
+- **Unified request log storage** — both HTTP/RPC and gRPC requests are stored in the ring buffer and database, queryable via the admin API
 - **Backend health checks** with automatic monitoring
 - **Graceful shutdown** with in-flight request draining
 
@@ -227,6 +227,19 @@ curl -X POST https://proxy.example.com/<token>/ \
 
 The token is stripped from the path before forwarding to backends and is never logged in plaintext.
 
+### gRPC Queries
+
+gRPC requests go directly to port `:9090` without authentication:
+
+```bash
+# List all available gRPC services
+grpcurl -plaintext proxy.example.com:9090 list
+
+# Query bank balance
+grpcurl -plaintext -d '{"address":"celestia1..."}' \
+  proxy.example.com:9090 cosmos.bank.v1beta1.Query/AllBalances
+```
+
 ## Admin API
 
 The admin API is served on a separate port (default `:8080`) with HTTP Basic Auth.
@@ -243,12 +256,14 @@ The admin API is served on a separate port (default `:8080`) with HTTP Basic Aut
 
 ### Log Query Parameters
 
+Both HTTP/RPC and gRPC requests appear in the logs endpoint. Each log entry includes `client_ip` for identifying callers. gRPC entries use `path: "grpc"` and `backend: "celestia-app-grpc"`, with the gRPC status code (e.g. 0 = OK, 12 = Unimplemented) in the `status_code` field.
+
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `method` | string | Filter by RPC method |
-| `token_name` | string | Filter by token name |
-| `backend` | string | Filter by backend |
-| `status_code` | int | Filter by status code |
+| `method` | string | Filter by RPC method (gRPC uses full method path, e.g. `/cosmos.bank.v1beta1.Query/Balance`) |
+| `token_name` | string | Filter by token name (empty for gRPC — no auth) |
+| `backend` | string | Filter by backend (e.g. `celestia-app-grpc`) |
+| `status_code` | int | Filter by status code (HTTP status for RPC, gRPC code for gRPC) |
 | `status_min` / `status_max` | int | Status code range |
 | `from` / `to` | ISO 8601 | Time range |
 | `latency_min` | float | Minimum latency in ms |
