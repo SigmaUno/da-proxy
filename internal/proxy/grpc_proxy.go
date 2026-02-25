@@ -193,35 +193,44 @@ func (p *GRPCProxy) streamHandler(_ interface{}, serverStream grpc.ServerStream)
 
 // forwardClientToBackend reads frames from the client and sends them to the backend.
 func (p *GRPCProxy) forwardClientToBackend(src grpc.ServerStream, dst grpc.ClientStream) error {
-	for {
+	for i := 0; ; i++ {
 		f := &frame{}
+		p.logger.Info("c2b_recv_waiting", zap.Int("frame", i))
 		if err := src.RecvMsg(f); err != nil {
-			// Client is done sending; signal backend.
+			p.logger.Info("c2b_recv_done", zap.Int("frame", i), zap.Error(err))
 			_ = dst.CloseSend()
 			if err == io.EOF {
 				return nil
 			}
 			return err
 		}
+		p.logger.Info("c2b_recv_ok", zap.Int("frame", i), zap.Int("bytes", len(f.payload)))
 		if err := dst.SendMsg(f); err != nil {
+			p.logger.Info("c2b_send_err", zap.Int("frame", i), zap.Error(err))
 			return err
 		}
+		p.logger.Info("c2b_send_ok", zap.Int("frame", i))
 	}
 }
 
 // forwardBackendToClient reads frames from the backend and sends them to the client.
 func (p *GRPCProxy) forwardBackendToClient(src grpc.ClientStream, dst grpc.ServerStream) error {
-	for {
+	for i := 0; ; i++ {
 		f := &frame{}
+		p.logger.Info("b2c_recv_waiting", zap.Int("frame", i))
 		if err := src.RecvMsg(f); err != nil {
+			p.logger.Info("b2c_recv_done", zap.Int("frame", i), zap.Error(err))
 			if err == io.EOF {
 				return nil
 			}
 			return err
 		}
+		p.logger.Info("b2c_recv_ok", zap.Int("frame", i), zap.Int("bytes", len(f.payload)))
 		if err := dst.SendMsg(f); err != nil {
+			p.logger.Info("b2c_send_err", zap.Int("frame", i), zap.Error(err))
 			return err
 		}
+		p.logger.Info("b2c_send_ok", zap.Int("frame", i))
 	}
 }
 
