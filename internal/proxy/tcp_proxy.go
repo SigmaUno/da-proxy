@@ -22,6 +22,7 @@ type TCPProxy struct {
 	metrics *metrics.Metrics
 	sinks   []LogSink
 
+	mu       sync.Mutex
 	listener net.Listener
 	wg       sync.WaitGroup
 	closed   atomic.Bool
@@ -40,7 +41,9 @@ func NewTCPProxy(router Router, logger *zap.Logger, m *metrics.Metrics, sinks ..
 // Serve accepts TCP connections on the given listener and proxies them
 // to a selected backend. It blocks until the listener is closed.
 func (p *TCPProxy) Serve(lis net.Listener) error {
+	p.mu.Lock()
 	p.listener = lis
+	p.mu.Unlock()
 
 	for {
 		conn, err := lis.Accept()
@@ -63,8 +66,11 @@ func (p *TCPProxy) Serve(lis net.Listener) error {
 // Close closes the listener and waits for active connections to drain.
 func (p *TCPProxy) Close() {
 	p.closed.Store(true)
-	if p.listener != nil {
-		_ = p.listener.Close()
+	p.mu.Lock()
+	lis := p.listener
+	p.mu.Unlock()
+	if lis != nil {
+		_ = lis.Close()
 	}
 	p.wg.Wait()
 }
