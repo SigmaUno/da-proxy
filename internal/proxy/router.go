@@ -19,6 +19,7 @@ const (
 	BackendCelestiaNodeArchivalRPC Backend = "celestia-node-archival-rpc"
 	BackendCelestiaAppArchivalRPC  Backend = "celestia-app-archival-rpc"
 	BackendCelestiaAppGRPC         Backend = "celestia-app-grpc"
+	BackendCelestiaAppP2P          Backend = "celestia-app-p2p"
 )
 
 // daNamespaces are JSON-RPC method prefixes routed to celestia-node.
@@ -76,12 +77,13 @@ func NewRouterWithTracker(backends config.BackendsConfig, ht *HeightTracker) Rou
 }
 
 func buildBalancers(b config.BackendsConfig) map[Backend]*Balancer {
-	m := make(map[Backend]*Balancer, 5)
+	m := make(map[Backend]*Balancer, 6)
 	m[BackendCelestiaAppRPC] = NewBalancer(b.CelestiaAppRPC)
 	m[BackendCelestiaNodeRPC] = NewBalancer(b.CelestiaNodeRPC)
 	m[BackendCelestiaNodeArchivalRPC] = NewBalancer(b.CelestiaNodeArchivalRPC)
 	m[BackendCelestiaAppArchivalRPC] = NewBalancer(b.CelestiaAppArchivalRPC)
 	m[BackendCelestiaAppGRPC] = NewBalancer(b.CelestiaAppGRPC)
+	m[BackendCelestiaAppP2P] = NewBalancer(b.CelestiaAppP2P)
 	return m
 }
 

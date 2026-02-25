@@ -63,6 +63,7 @@ func (h *handlers) handleBackends(c echo.Context) error {
 			{"celestia-node-archival-rpc", b.CelestiaNodeArchivalRPC},
 			{"celestia-app-archival-rpc", b.CelestiaAppArchivalRPC},
 			{"celestia-app-grpc", b.CelestiaAppGRPC},
+			{"celestia-app-p2p", b.CelestiaAppP2P},
 		}
 	}
 

@@ -17,6 +17,9 @@ type Metrics struct {
 	RateLimitHitsTotal    *prometheus.CounterVec
 	GRPCRequestsTotal     *prometheus.CounterVec
 	GRPCRequestDuration   *prometheus.HistogramVec
+	TCPConnectionsTotal   *prometheus.CounterVec
+	TCPConnectionDuration *prometheus.HistogramVec
+	TCPBytesTotal         *prometheus.CounterVec
 }
 
 // NewMetrics creates and registers all Prometheus metrics with the given registerer.
@@ -85,6 +88,22 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Help:    "gRPC request latency distribution in seconds.",
 			Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0},
 		}, []string{"method"}),
+
+		TCPConnectionsTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "daproxy_tcp_connections_total",
+			Help: "Total number of TCP proxy connections.",
+		}, []string{"status"}),
+
+		TCPConnectionDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "daproxy_tcp_connection_duration_seconds",
+			Help:    "TCP proxy connection duration in seconds.",
+			Buckets: []float64{0.1, 0.5, 1, 5, 10, 30, 60, 300, 600},
+		}, []string{}),
+
+		TCPBytesTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "daproxy_tcp_bytes_total",
+			Help: "Total bytes transferred through TCP proxy.",
+		}, []string{"direction"}),
 	}
 
 	reg.MustRegister(
@@ -100,6 +119,9 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		m.RateLimitHitsTotal,
 		m.GRPCRequestsTotal,
 		m.GRPCRequestDuration,
+		m.TCPConnectionsTotal,
+		m.TCPConnectionDuration,
+		m.TCPBytesTotal,
 	)
 
 	return m

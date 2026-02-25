@@ -146,6 +146,15 @@ func (h *healthChecker) checkAll() {
 		})
 	}
 
+	// P2P (TCP) backends.
+	for i, ep := range h.backends.CelestiaAppP2P {
+		endpoint := ep
+		checks = append(checks, healthCheck{
+			h.endpointName("celestia-app-p2p", i, len(h.backends.CelestiaAppP2P)),
+			func() HealthStatus { return h.checkTCPDial(endpoint) },
+		})
+	}
+
 	for _, check := range checks {
 		status := check.fn()
 		status.Backend = check.name

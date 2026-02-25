@@ -61,6 +61,7 @@ func (c CacheConfig) MaxEntrySizeBytes() (int64, error) {
 type ServerConfig struct {
 	Listen       string        `yaml:"listen"`
 	GRPCListen   string        `yaml:"grpc_listen"`
+	P2PListen    string        `yaml:"p2p_listen"`
 	TLSCert      string        `yaml:"tls_cert"`
 	TLSKey       string        `yaml:"tls_key"`
 	ReadTimeout  time.Duration `yaml:"read_timeout"`
@@ -117,6 +118,7 @@ type BackendsConfig struct {
 	CelestiaNodeArchivalRPC Endpoints     `yaml:"celestia_node_archival_rpc"`
 	CelestiaAppArchivalRPC  Endpoints     `yaml:"celestia_app_archival_rpc"`
 	CelestiaAppGRPC         Endpoints     `yaml:"celestia_app_grpc"`
+	CelestiaAppP2P          Endpoints     `yaml:"celestia_app_p2p"`
 	PruningWindow           int64         `yaml:"pruning_window"`
 	HealthCheckInterval     time.Duration `yaml:"health_check_interval"`
 }
@@ -241,6 +243,9 @@ func applyDefaults(c *Config) {
 	}
 	if c.Server.GRPCListen == "" {
 		c.Server.GRPCListen = ":9090"
+	}
+	if c.Server.P2PListen == "" {
+		c.Server.P2PListen = ":26656"
 	}
 
 	if len(c.Backends.CelestiaAppRPC) == 0 {

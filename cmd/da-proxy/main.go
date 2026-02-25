@@ -54,6 +54,7 @@ func main() {
 		zap.String("config", cfgPath),
 		zap.String("proxy_listen", cfg.Server.Listen),
 		zap.String("grpc_listen", cfg.Server.GRPCListen),
+		zap.String("p2p_listen", cfg.Server.P2PListen),
 		zap.String("admin_listen", cfg.Admin.Listen),
 		zap.String("metrics_listen", cfg.Metrics.Listen),
 	)
@@ -192,6 +193,16 @@ func main() {
 		)
 	}
 
+	// --- TCP/P2P proxy (optional) ---
+	var tcpProxy *proxy.TCPProxy
+	if len(cfg.Backends.CelestiaAppP2P) > 0 {
+		tcpProxy = proxy.NewTCPProxy(router, logger, promMetrics, ringBuffer, logStore)
+		logger.Info("TCP/P2P proxy configured",
+			zap.String("p2p_listen", cfg.Server.P2PListen),
+			zap.Int("backends", len(cfg.Backends.CelestiaAppP2P)),
+		)
+	}
+
 	// --- Proxy server ---
 	proxyServer := echo.New()
 	proxyServer.HideBanner = true
@@ -287,6 +298,20 @@ func main() {
 		}()
 	}
 
+	// TCP/P2P proxy server.
+	if tcpProxy != nil {
+		go func() {
+			lis, lisErr := net.Listen("tcp", cfg.Server.P2PListen)
+			if lisErr != nil {
+				logger.Fatal("TCP/P2P server listen failed", zap.Error(lisErr))
+			}
+			logger.Info("TCP/P2P proxy server starting", zap.String("addr", cfg.Server.P2PListen))
+			if srvErr := tcpProxy.Serve(lis); srvErr != nil {
+				logger.Fatal("TCP/P2P proxy server failed", zap.Error(srvErr))
+			}
+		}()
+	}
+
 	// --- Graceful shutdown ---
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -301,6 +326,9 @@ func main() {
 
 	if grpcProxy != nil {
 		grpcProxy.GracefulStop()
+	}
+	if tcpProxy != nil {
+		tcpProxy.Close()
 	}
 
 	if err := proxyServer.Shutdown(shutdownCtx); err != nil {
