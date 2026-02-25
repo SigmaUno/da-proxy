@@ -12,6 +12,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 
 	"github.com/SigmaUno/da-proxy/internal/metrics"
@@ -87,6 +88,12 @@ func (p *GRPCProxy) streamHandler(_ interface{}, serverStream grpc.ServerStream)
 	}
 
 	start := time.Now()
+
+	// Extract client IP from the gRPC peer.
+	var clientIP string
+	if pr, ok := peer.FromContext(serverStream.Context()); ok && pr.Addr != nil {
+		clientIP = pr.Addr.String()
+	}
 
 	// Select a backend endpoint.
 	endpoint := p.router.TargetURL(BackendCelestiaAppGRPC)
@@ -211,6 +218,7 @@ func (p *GRPCProxy) streamHandler(_ interface{}, serverStream grpc.ServerStream)
 		zap.String("backend", endpoint),
 		zap.String("grpc_code", grpcCode.String()),
 		zap.Duration("latency", time.Since(start)),
+		zap.String("client_ip", clientIP),
 	)
 
 	return retErr
