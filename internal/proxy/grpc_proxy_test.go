@@ -258,6 +258,63 @@ func TestGRPCProxy_ServerStreaming(t *testing.T) {
 	assert.Equal(t, []byte{3}, responses[2])
 }
 
+func TestGRPCProxy_BackendError(t *testing.T) {
+	// Simulates the production hang: backend returns Unimplemented error.
+	// The proxy must return the error promptly without hanging.
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+
+	errBackend := grpc.NewServer(
+		grpc.ForceServerCodec(rawCodec{}),
+		grpc.UnknownServiceHandler(func(_ interface{}, stream grpc.ServerStream) error {
+			// Read the request, then return Unimplemented (like a real backend
+			// that doesn't support a particular service).
+			msg := &frame{}
+			if err := stream.RecvMsg(msg); err != nil {
+				return err
+			}
+			return status.Error(codes.Unimplemented, "unknown service test.Reflection")
+		}),
+	)
+	go func() { _ = errBackend.Serve(lis) }()
+	t.Cleanup(errBackend.GracefulStop)
+	backendAddr := lis.Addr().String()
+
+	r := NewRouter(config.BackendsConfig{
+		CelestiaAppRPC:  config.Endpoints{"http://127.0.0.1:26657"},
+		CelestiaNodeRPC: config.Endpoints{"http://127.0.0.1:26658"},
+		CelestiaAppGRPC: config.Endpoints{backendAddr},
+	})
+
+	m := testMetrics(t)
+	p := NewGRPCProxy(r, zap.NewNop(), m)
+
+	proxyLis, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	go func() { _ = p.Serve(proxyLis) }()
+	t.Cleanup(p.GracefulStop)
+
+	conn, err := grpc.NewClient(proxyLis.Addr().String(),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithDefaultCallOptions(grpc.ForceCodec(rawCodec{})),
+	)
+	require.NoError(t, err)
+	defer func() { _ = conn.Close() }()
+
+	// Use a short timeout — if the proxy hangs, this will catch it.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	resp := &frame{}
+	err = conn.Invoke(ctx, "/test.Reflection/List", &frame{payload: []byte("list")}, resp)
+	require.Error(t, err)
+
+	st, ok := status.FromError(err)
+	require.True(t, ok)
+	assert.Equal(t, codes.Unimplemented, st.Code())
+	assert.Contains(t, st.Message(), "unknown service")
+}
+
 func TestGRPCProxy_LoadBalancing(t *testing.T) {
 	// Start two test echo backends.
 	backend1 := newTestEchoServer(t)

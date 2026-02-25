@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"io"
 	"net"
 	"time"
@@ -93,7 +94,7 @@ func (p *GRPCProxy) streamHandler(_ interface{}, serverStream grpc.ServerStream)
 		return status.Error(codes.Unavailable, "no gRPC backend available")
 	}
 
-	p.logger.Info("grpc_request",
+	p.logger.Debug("grpc_request",
 		zap.String("method", fullMethod),
 		zap.String("backend", endpoint),
 	)
@@ -116,17 +117,20 @@ func (p *GRPCProxy) streamHandler(_ interface{}, serverStream grpc.ServerStream)
 
 	// Forward incoming metadata.
 	md, _ := metadata.FromIncomingContext(serverStream.Context())
-	ctx := metadata.NewOutgoingContext(serverStream.Context(), md)
+
+	// Create a cancellable context derived from the server stream's context.
+	// When either forwarding direction finishes (error or EOF from backend),
+	// we cancel this context to unblock the other goroutine's RecvMsg.
+	ctx, cancel := context.WithCancel(serverStream.Context())
+	defer cancel()
+
+	ctx = metadata.NewOutgoingContext(ctx, md)
 
 	// Open a stream to the backend.
 	desc := &grpc.StreamDesc{
 		ServerStreams: true,
 		ClientStreams: true,
 	}
-	p.logger.Info("grpc_opening_stream",
-		zap.String("method", fullMethod),
-		zap.String("target", target),
-	)
 
 	clientStream, err := conn.NewStream(ctx, desc, fullMethod)
 	if err != nil {
@@ -139,29 +143,38 @@ func (p *GRPCProxy) streamHandler(_ interface{}, serverStream grpc.ServerStream)
 		return err
 	}
 
-	p.logger.Info("grpc_stream_opened",
-		zap.String("method", fullMethod),
-		zap.String("backend", endpoint),
-	)
-
-	// Bidirectional forwarding.
+	// Bidirectional forwarding with cancellation.
+	// When one direction completes, we cancel the context to unblock the other.
 	errc := make(chan error, 2)
 
 	// Client -> Backend.
 	go func() {
-		errc <- p.forwardClientToBackend(serverStream, clientStream)
+		err := p.forwardClientToBackend(serverStream, clientStream)
+		// If client finished sending (EOF), don't cancel — let backend finish responding.
+		// If client errored, cancel to unblock backend->client.
+		if err != nil {
+			cancel()
+		}
+		errc <- err
 	}()
 
 	// Backend -> Client.
 	go func() {
-		errc <- p.forwardBackendToClient(clientStream, serverStream)
+		err := p.forwardBackendToClient(clientStream, serverStream)
+		// Backend finished (EOF or error) — cancel to unblock client->backend RecvMsg.
+		cancel()
+		errc <- err
 	}()
 
 	// Wait for both directions to finish.
+	// After cancel(), the blocked goroutine will unblock quickly.
 	var retErr error
 	for i := 0; i < 2; i++ {
 		if err := <-errc; err != nil {
-			retErr = err
+			// Keep the first meaningful error (ignore context cancelled from our own cancel).
+			if retErr == nil {
+				retErr = err
+			}
 		}
 	}
 
@@ -193,44 +206,34 @@ func (p *GRPCProxy) streamHandler(_ interface{}, serverStream grpc.ServerStream)
 
 // forwardClientToBackend reads frames from the client and sends them to the backend.
 func (p *GRPCProxy) forwardClientToBackend(src grpc.ServerStream, dst grpc.ClientStream) error {
-	for i := 0; ; i++ {
+	for {
 		f := &frame{}
-		p.logger.Info("c2b_recv_waiting", zap.Int("frame", i))
 		if err := src.RecvMsg(f); err != nil {
-			p.logger.Info("c2b_recv_done", zap.Int("frame", i), zap.Error(err))
 			_ = dst.CloseSend()
 			if err == io.EOF {
 				return nil
 			}
 			return err
 		}
-		p.logger.Info("c2b_recv_ok", zap.Int("frame", i), zap.Int("bytes", len(f.payload)))
 		if err := dst.SendMsg(f); err != nil {
-			p.logger.Info("c2b_send_err", zap.Int("frame", i), zap.Error(err))
 			return err
 		}
-		p.logger.Info("c2b_send_ok", zap.Int("frame", i))
 	}
 }
 
 // forwardBackendToClient reads frames from the backend and sends them to the client.
 func (p *GRPCProxy) forwardBackendToClient(src grpc.ClientStream, dst grpc.ServerStream) error {
-	for i := 0; ; i++ {
+	for {
 		f := &frame{}
-		p.logger.Info("b2c_recv_waiting", zap.Int("frame", i))
 		if err := src.RecvMsg(f); err != nil {
-			p.logger.Info("b2c_recv_done", zap.Int("frame", i), zap.Error(err))
 			if err == io.EOF {
 				return nil
 			}
 			return err
 		}
-		p.logger.Info("b2c_recv_ok", zap.Int("frame", i), zap.Int("bytes", len(f.payload)))
 		if err := dst.SendMsg(f); err != nil {
-			p.logger.Info("b2c_send_err", zap.Int("frame", i), zap.Error(err))
 			return err
 		}
-		p.logger.Info("b2c_send_ok", zap.Int("frame", i))
 	}
 }
 

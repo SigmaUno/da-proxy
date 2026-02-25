@@ -90,7 +90,7 @@ func (h *Handler) HandleRequest(c echo.Context) error {
 	c.Set(middleware.ContextKeyBackend, string(decision.Backend))
 	c.Set(middleware.ContextKeyRPCMethod, decision.Method)
 
-	h.logger.Info("rpc_request",
+	h.logger.Debug("rpc_request",
 		zap.String("method", decision.Method),
 		zap.String("backend", string(decision.Backend)),
 		zap.String("target", decision.TargetURL),
